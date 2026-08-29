@@ -59,9 +59,14 @@ function StatusRail({ linkUp, bridgeUp, alarm }: { linkUp: boolean; bridgeUp: bo
         <h1 className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-wide">
           Home<span className="text-lamp">Hub</span>
         </h1>
-        <a href="/panel" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
-          Wall panel
-        </a>
+        <nav className="flex items-center gap-2">
+          <a href="/panel" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
+            Wall panel
+          </a>
+          <a href="/security" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
+            Security board
+          </a>
+        </nav>
         <div className="flex items-center gap-4 text-xs text-ink-muted">
           <span className="flex items-center gap-1.5"><Lamp on={linkUp} alert={!linkUp} /> App link</span>
           <span className="flex items-center gap-1.5"><Lamp on={bridgeUp} alert={!bridgeUp} /> HA bridge</span>
