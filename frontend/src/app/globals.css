@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* HomeHub design tokens — dark control-room panel.
+   Deep blue-slate field, hairline dividers, a single amber "indicator lamp"
+   accent, green/red reserved strictly for ok/alert semantics. */
+@theme {
+  --color-field: #0c1117;
+  --color-panel: #141b24;
+  --color-panel-raised: #1a2330;
+  --color-line: #243040;
+  --color-ink: #e8edf2;
+  --color-ink-muted: #7e8c9c;
+  --color-lamp: #e8a33d; /* accent: amber indicator */
+  --color-ok: #4caf7d;
+  --color-alert: #e05252;
+
+  --font-display: "Avenir Next", "Futura", "Segoe UI", system-ui, sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+}
+
+html {
+  background: var(--color-field);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Slow pulse for the live bridge lamp */
+@keyframes lamp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.lamp-live {
+  animation: lamp-pulse 2.4s ease-in-out infinite;
+}
