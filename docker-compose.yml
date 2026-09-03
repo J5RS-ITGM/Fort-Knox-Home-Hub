@@ -1,14 +1,16 @@
-# HomeHub — production-ish local stack.
-# Backend + Postgres + frontend, all LAN-only. Remote access is expected to
-# come through a Cloudflare Tunnel pointed at the frontend (and optionally
-# the API), so nothing here publishes beyond the host.
+# HomeHub stack — db + backend + frontend.
+#
+# Shared-box friendly: services bind to 127.0.0.1 on non-default ports by
+# default, so a host reverse proxy (nginx/Caddy) terminates TLS and routes
+# one domain to them alongside other apps. See deploy/ for proxy examples.
+# For a LAN deployment (kitchen Pi), set BIND_ADDR=0.0.0.0 in .env.
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: homehub
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-homehub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: homehub
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -22,28 +24,31 @@ services:
     build: ./backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://homehub:${POSTGRES_PASSWORD:-homehub}@db:5432/homehub
+      DATABASE_URL: postgresql+asyncpg://homehub:${POSTGRES_PASSWORD}@db:5432/homehub
       DB_AUTO_CREATE: "true"   # switch to alembic upgrade head once schema settles
       HA_MOCK: ${HA_MOCK:-true}
       HA_URL: ${HA_URL:-http://homeassistant.local:8123}
       HA_TOKEN: ${HA_TOKEN:-}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
+      # Same-origin behind the reverse proxy -> no CORS needed (empty).
+      # For split-origin dev, set e.g. http://localhost:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${BIND_ADDR:-127.0.0.1}:${BACKEND_PORT:-8100}:8000"
 
   frontend:
     build: ./frontend
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_WS_URL: ${PUBLIC_WS_URL:-ws://localhost:8000/ws}
+    # No NEXT_PUBLIC_* URLs: the app defaults to same-origin (/api, /ws),
+    # which is exactly right behind the reverse proxy.
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "${BIND_ADDR:-127.0.0.1}:${FRONTEND_PORT:-3100}:3000"
 
 volumes:
   pgdata:

@@ -12,6 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401 — register models with Base.metadata
+from .api.auth_routes import admin_router, auth_router
+from .api.routes import protected as protected_router
 from .api.routes import router as api_router
 from .config import get_settings
 from .db import Base, engine
@@ -54,4 +56,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(protected_router)
+app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(ws_router)

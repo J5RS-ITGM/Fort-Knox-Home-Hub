@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import AuthGate from "@/components/AuthGate";
 
 // SecurityBoard drives WebGL + pointer capture; render client-side only.
 const SecurityBoard = dynamic(() => import("@/components/SecurityBoard.jsx"), {
@@ -13,5 +14,9 @@ const SecurityBoard = dynamic(() => import("@/components/SecurityBoard.jsx"), {
 });
 
 export default function SecurityPage() {
-  return <SecurityBoard />;
+  return (
+    <AuthGate>
+      <SecurityBoard />
+    </AuthGate>
+  );
 }

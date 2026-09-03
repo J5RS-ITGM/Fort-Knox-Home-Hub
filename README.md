@@ -85,9 +85,41 @@ docker-compose.yml   db + backend + frontend
 - WebSocket: snapshot → ping/pong → live state pushes
 - `next build` passes clean (Next 15.5, React 19, Tailwind 4)
 
+## Auth & PWA
+
+- Session auth: bcrypt passwords, opaque tokens (SHA-256 at rest) in
+  HttpOnly/Secure/SameSite=Lax cookies. Logout and disable revoke instantly.
+- First run: visiting the app offers admin creation once (`/api/auth/setup`
+  seals after the first user).
+- Roles: `admin` (user management + audit log at `/admin`) and `member`.
+- Everything but `/api/health` and auth endpoints requires a session; the
+  WebSocket validates the cookie before accepting.
+- Audit log records logins, failures, service calls, and admin actions.
+- PWA: installable (manifest + icons); the service worker caches only the
+  static shell — never `/api` or `/ws`, because stale device state shown as
+  fresh is worse than an offline banner.
+
+## Deploying on a shared VPS (Vultr)
+
+The stack binds to 127.0.0.1:8100 (API) and 127.0.0.1:3100 (app) so it
+coexists with other apps behind the host reverse proxy:
+
+```bash
+git clone git@github.com:J5RS-ITGM/CommandCenter.git && cd CommandCenter
+cp .env.example .env    # set POSTGRES_PASSWORD; keep COOKIE_SECURE=true
+docker compose up -d --build
+```
+
+Then install `deploy/nginx-homehub.conf.example` (or the Caddyfile block)
+for your domain — it routes `/` to the app and `/api` + `/ws` to the API on
+one origin, which is what makes the cookie auth work with zero CORS.
+
+**Reaching HA from the VPS:** point `HA_URL` across a WireGuard or
+Tailscale tunnel to your home network. Never port-forward HA to the
+internet. Until the tunnel exists, `HA_MOCK=true` runs the full app with
+simulated devices.
+
 ## Next up
 
-- Wall-panel route reusing `useHomeHub` with the saved `panel_layouts`
-- Isometric security board consuming `sensor_placements`
-- Auth model for remote access (Cloudflare Access in front of the tunnel; LAN stays open)
-- Chore Quest + recipes modules on new Postgres tables
+- HomeHubDashboard port (replaces the current `/`), then Chore Quest +
+  recipes modules on new Postgres tables

@@ -52,3 +52,53 @@ class HealthOut(BaseModel):
     mode: str  # "mock" | "live"
     ha_connected: bool
     entity_count: int
+
+
+# -- auth --------------------------------------------------------------------
+class SetupIn(BaseModel):
+    username: str
+    password: str
+    display_name: str = ""
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePassword(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    username: str
+    display_name: str
+    role: str
+    disabled: bool
+    created_at: datetime
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    display_name: str = ""
+    role: str = "member"
+
+
+class UserPatch(BaseModel):
+    role: str | None = None
+    disabled: bool | None = None
+    password: str | None = None
+    display_name: str | None = None
+
+
+class AuditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ts: datetime
+    username: str
+    action: str
+    detail: str

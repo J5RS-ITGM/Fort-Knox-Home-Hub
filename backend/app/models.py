@@ -1,15 +1,17 @@
 """Database models.
 
 Home Assistant remains the source of truth for device *state*. Postgres owns
-everything HA doesn't: household users, where sensors live on the floor plan
-(feeds the isometric security board), and per-panel layout configuration for
-the wall tablets.
+everything HA doesn't: accounts, sessions, audit trail, sensor placements
+(feeds the isometric security board), and per-panel layout configuration.
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean, DateTime, Float, ForeignKey, Integer, String, Text,
+    UniqueConstraint, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -23,12 +25,41 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    name: Mapped[str] = mapped_column(String(80), nullable=False)
-    role: Mapped[str] = mapped_column(String(16), nullable=False, default="child")  # parent | child
-    pin_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="member")  # admin | member
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     layouts: Mapped[list["PanelLayout"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class Session(Base):
+    """Server-side session. The cookie carries a random token; only its
+    SHA-256 lands here, so a database leak doesn't leak usable sessions."""
+
+    __tablename__ = "sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class AuditLog(Base):
+    """Who did what, when. Service calls, logins, admin actions."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    detail: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
 
 class SensorPlacement(Base):
@@ -57,7 +88,7 @@ class PanelLayout(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
-    panel_key: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g. "kitchen", "bedroom"
+    panel_key: Mapped[str] = mapped_column(String(64), nullable=False)
     layout_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

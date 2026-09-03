@@ -9,6 +9,8 @@
 import { useMemo, useState } from "react";
 import { callService, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
+import { logout, useMe } from "@/lib/auth";
+import AuthGate from "@/components/AuthGate";
 
 // ---------- helpers ----------------------------------------------------------
 
@@ -52,7 +54,7 @@ function Lamp({ on, alert }: { on: boolean; alert?: boolean }) {
   return <span className={`inline-block size-2 rounded-full ${color} ${on && !alert ? "lamp-live" : ""}`} />;
 }
 
-function StatusRail({ linkUp, bridgeUp, alarm }: { linkUp: boolean; bridgeUp: boolean; alarm?: Entity }) {
+function StatusRail({ linkUp, bridgeUp, alarm, isAdmin }: { linkUp: boolean; bridgeUp: boolean; alarm?: Entity; isAdmin: boolean }) {
   return (
     <header className="sticky top-0 z-10 border-b border-line bg-field/90 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
@@ -66,6 +68,14 @@ function StatusRail({ linkUp, bridgeUp, alarm }: { linkUp: boolean; bridgeUp: bo
           <a href="/security" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
             Security board
           </a>
+          {isAdmin && (
+            <a href="/admin" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
+              Admin
+            </a>
+          )}
+          <button onClick={() => logout()} className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-alert/50 hover:text-ink">
+            Sign out
+          </button>
         </nav>
         <div className="flex items-center gap-4 text-xs text-ink-muted">
           <span className="flex items-center gap-1.5"><Lamp on={linkUp} alert={!linkUp} /> App link</span>
@@ -174,8 +184,9 @@ function EntityCard({ e }: { e: Entity }) {
 
 // ---------- page -------------------------------------------------------------
 
-export default function Dashboard() {
+function DashboardInner() {
   const { entities, linkUp, bridgeUp } = useHomeHub();
+  const { me } = useMe();
   const list = useMemo(() => Array.from(entities.values()), [entities]);
   const alarm = entities.get("alarm_control_panel.homehub");
 
@@ -193,7 +204,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-dvh">
-      <StatusRail linkUp={linkUp} bridgeUp={bridgeUp} alarm={alarm} />
+      <StatusRail linkUp={linkUp} bridgeUp={bridgeUp} alarm={alarm} isAdmin={me?.role === "admin"} />
 
       <main className="mx-auto max-w-5xl px-4 py-6">
         {!linkUp && (
@@ -220,5 +231,13 @@ export default function Dashboard() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <AuthGate>
+      <DashboardInner />
+    </AuthGate>
   );
 }

@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     ha_token: str = ""  # long-lived access token; never commit a real one
 
     # --- API ----------------------------------------------------------------
+    # --- Auth ---
+    # Secure cookies require HTTPS; keep False only for local dev over http.
+    cookie_secure: bool = False
+    session_ttl_days: int = 30
+
     cors_origins: str = "http://localhost:3000"
 
     @property

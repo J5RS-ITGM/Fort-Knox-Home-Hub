@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Entity, WS_URL } from "./api";
+import { Entity, wsUrl } from "./api";
 
 type ServerMessage =
   | { type: "snapshot"; connected: boolean; entities: Entity[] }
@@ -35,7 +35,7 @@ export function useHomeHub(): HomeHubState {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(wsUrl());
 
       ws.onopen = () => {
         setLinkUp(true);

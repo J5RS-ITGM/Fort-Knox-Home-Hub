@@ -16,6 +16,8 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from .auth import COOKIE_NAME, resolve_session
+from .db import SessionLocal
 from .ha.state import cache
 
 log = logging.getLogger("homehub.ws")
@@ -24,6 +26,13 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
+    # Authenticate the session cookie before accepting; browsers send
+    # cookies on the upgrade request automatically.
+    async with SessionLocal() as db:
+        user = await resolve_session(db, ws.cookies.get(COOKIE_NAME))
+    if user is None:
+        await ws.close(code=4401, reason="not authenticated")
+        return
     await ws.accept()
     queue = cache.subscribe()
     try:

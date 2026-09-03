@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import AuthGate from "@/components/AuthGate";
 
 // WallPanel drives WebGL + window listeners; render client-side only.
 const WallPanel = dynamic(() => import("@/components/WallPanel.jsx"), {
@@ -13,5 +14,9 @@ const WallPanel = dynamic(() => import("@/components/WallPanel.jsx"), {
 });
 
 export default function PanelPage() {
-  return <WallPanel />;
+  return (
+    <AuthGate>
+      <WallPanel />
+    </AuthGate>
+  );
 }

@@ -18,7 +18,11 @@ before changing anything.
 4. **Local-first.** No new cloud dependencies. No CDN scripts, no Google
    Fonts at build time (egress may be blocked), no external calls at runtime
    except explicitly approved ones (Twilio for panic, RainViewer for radar).
-5. **Never commit secrets.** `.env` is gitignored; keep it that way. Mock
+5. **Auth is mandatory.** Every new API route requires a session
+   (`get_current_user`) unless it is genuinely public; admin surfaces use
+   `require_admin`; meaningful actions get an `audit()` entry. Sessions are
+   HttpOnly cookies — never introduce tokens in localStorage or JWTs.
+6. **Never commit secrets.** `.env` is gitignored; keep it that way. Mock
    mode (`HA_MOCK=true`, the default) must always work with zero services
    and zero credentials.
 

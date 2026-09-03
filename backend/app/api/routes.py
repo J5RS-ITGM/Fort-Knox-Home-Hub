@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
+from ..auth import audit, get_current_user
 from ..config import get_settings
 from ..db import get_session
 from ..ha.state import cache
@@ -19,6 +20,7 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api")
+protected = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 
 # Domains and services the app is allowed to forward. Everything else is
 # rejected — the dashboard is a control surface, not a raw HA console.
@@ -45,12 +47,12 @@ async def health() -> HealthOut:
 
 
 # -- entities ----------------------------------------------------------------
-@router.get("/entities", response_model=list[EntityOut])
+@protected.get("/entities", response_model=list[EntityOut])
 async def list_entities() -> list[EntityOut]:
     return [EntityOut(**e.to_dict()) for e in cache.snapshot()]
 
 
-@router.get("/entities/{entity_id}", response_model=EntityOut)
+@protected.get("/entities/{entity_id}", response_model=EntityOut)
 async def get_entity(entity_id: str) -> EntityOut:
     ent = cache.get(entity_id)
     if not ent:
@@ -59,8 +61,15 @@ async def get_entity(entity_id: str) -> EntityOut:
 
 
 # -- service calls -----------------------------------------------------------
-@router.post("/services/{domain}/{service}", status_code=202)
-async def call_service(domain: str, service: str, body: ServiceCall, request: Request) -> dict:
+@protected.post("/services/{domain}/{service}", status_code=202)
+async def call_service(
+    domain: str,
+    service: str,
+    body: ServiceCall,
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     if domain not in ALLOWED_SERVICES or service not in ALLOWED_SERVICES[domain]:
         raise HTTPException(403, f"service {domain}.{service} is not exposed by this app")
     if not cache.get(body.entity_id):
@@ -70,17 +79,18 @@ async def call_service(domain: str, service: str, body: ServiceCall, request: Re
         await bridge.call_service(domain, service, body.entity_id, body.data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"service call failed: {exc}") from exc
+    await audit(session, user.username, "service_call", f"{domain}.{service} -> {body.entity_id}")
     return {"ok": True}
 
 
 # -- sensor placements -------------------------------------------------------
-@router.get("/placements", response_model=list[PlacementOut])
+@protected.get("/placements", response_model=list[PlacementOut])
 async def list_placements(session: AsyncSession = Depends(get_session)) -> list[models.SensorPlacement]:
     result = await session.execute(select(models.SensorPlacement).order_by(models.SensorPlacement.entity_id))
     return list(result.scalars())
 
 
-@router.put("/placements/{entity_id}", response_model=PlacementOut)
+@protected.put("/placements/{entity_id}", response_model=PlacementOut)
 async def upsert_placement(
     entity_id: str, body: PlacementIn, session: AsyncSession = Depends(get_session)
 ) -> models.SensorPlacement:
@@ -102,7 +112,7 @@ async def upsert_placement(
 
 
 # -- panel layouts -----------------------------------------------------------
-@router.get("/layouts/{panel_key}", response_model=LayoutOut)
+@protected.get("/layouts/{panel_key}", response_model=LayoutOut)
 async def get_layout(panel_key: str, session: AsyncSession = Depends(get_session)) -> models.PanelLayout:
     result = await session.execute(
         select(models.PanelLayout).where(
@@ -115,7 +125,7 @@ async def get_layout(panel_key: str, session: AsyncSession = Depends(get_session
     return layout
 
 
-@router.put("/layouts/{panel_key}", response_model=LayoutOut)
+@protected.put("/layouts/{panel_key}", response_model=LayoutOut)
 async def put_layout(
     panel_key: str, body: LayoutIn, session: AsyncSession = Depends(get_session)
 ) -> models.PanelLayout:
