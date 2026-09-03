@@ -102,3 +102,67 @@ class AuditOut(BaseModel):
     username: str
     action: str
     detail: str
+
+
+# -- admin config ------------------------------------------------------------
+class HASettingsOut(BaseModel):
+    ha_url: str
+    ha_mock: bool
+    token_set: bool
+    mode: str  # what the bridge is actually running
+
+
+class HASettingsIn(BaseModel):
+    ha_url: str | None = None
+    ha_mock: bool | None = None
+    ha_token: str | None = None  # write-only; never echoed back
+
+
+class FamilyIn(BaseModel):
+    name: str
+    emoji: str = "🙂"
+    color: str = "#6b8afd"
+    sort: int = 0
+    user_id: str | None = None
+
+
+class FamilyPatch(BaseModel):
+    name: str | None = None
+    emoji: str | None = None
+    color: str | None = None
+    sort: int | None = None
+    user_id: str | None = None
+
+
+class FamilyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    emoji: str
+    color: str
+    sort: int
+    user_id: str | None = None
+
+
+
+# -- admin config ------------------------------------------------------------
+class AllowIn(BaseModel):
+    domain: str
+    service: str
+    note: str = ""
+
+
+class AllowOut(AllowIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+
+
+class SettingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    key: str
+    value: str
+
+
+class SettingsIn(BaseModel):
+    values: dict[str, str]
+

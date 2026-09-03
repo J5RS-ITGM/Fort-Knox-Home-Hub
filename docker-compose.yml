@@ -34,6 +34,8 @@ services:
       # Same-origin behind the reverse proxy -> no CORS needed (empty).
       # For split-origin dev, set e.g. http://localhost:3000
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+    volumes:
+      - ./seed.json:/app/seed.json:ro
     depends_on:
       db:
         condition: service_healthy

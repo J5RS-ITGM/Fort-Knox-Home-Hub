@@ -95,3 +95,46 @@ class PanelLayout(Base):
     )
 
     user: Mapped[User | None] = relationship(back_populates="layouts")
+
+
+class AppSetting(Base):
+    """Key/value runtime configuration (HA connection, feature flags).
+    Values here override environment defaults; the HA token is stored
+    server-side only and is never returned by any API."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FamilyMember(Base):
+    """Household roster (feeds Chore Quest, recipes, panel personalization).
+    Separate from auth users: kids on a wall panel don't need passwords."""
+
+    __tablename__ = "family_members"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    emoji: Mapped[str] = mapped_column(String(16), nullable=False, default="🙂")
+    color: Mapped[str] = mapped_column(String(16), nullable=False, default="#6b8afd")
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ServiceAllow(Base):
+    """DB-backed service allowlist: which HA services the app may forward.
+    Seeded with safe defaults on first boot; admin-editable with audit."""
+
+    __tablename__ = "service_allowlist"
+    __table_args__ = (UniqueConstraint("domain", "service", name="uq_allow_domain_service"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    domain: Mapped[str] = mapped_column(String(48), nullable=False)
+    service: Mapped[str] = mapped_column(String(64), nullable=False)
+    note: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+

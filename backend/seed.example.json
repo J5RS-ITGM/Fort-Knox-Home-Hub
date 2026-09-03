@@ -1,0 +1,133 @@
+{
+  "_comment": "cp to seed.json (gitignored) and fill in your real household. users = login accounts (temp passwords printed once by the seed). family = household roster for Chore Quest / panels (no passwords needed).",
+  "users": [
+    {
+      "username": "eric",
+      "display_name": "Eric",
+      "role": "admin"
+    },
+    {
+      "username": "partner",
+      "display_name": "Partner",
+      "role": "member"
+    }
+  ],
+  "family": [
+    {
+      "name": "Eric",
+      "emoji": "🛠️",
+      "color": "#6b8afd",
+      "sort": 0
+    },
+    {
+      "name": "Partner",
+      "emoji": "🌟",
+      "color": "#8b6bfd",
+      "sort": 1
+    },
+    {
+      "name": "Kid 1",
+      "emoji": "🦖",
+      "color": "#3fb98f",
+      "sort": 2
+    },
+    {
+      "name": "Kid 2",
+      "emoji": "🚀",
+      "color": "#f0a838",
+      "sort": 3
+    }
+  ],
+  "placements": [
+    {
+      "entity_id": "binary_sensor.front_door_contact",
+      "room": "Living Room",
+      "floor": 0,
+      "x": -2.2,
+      "y": -3.4
+    },
+    {
+      "entity_id": "binary_sensor.basement_window_contact",
+      "room": "Living Room",
+      "floor": 0,
+      "x": -3.6,
+      "y": -1.9
+    },
+    {
+      "entity_id": "binary_sensor.kitchen_window_contact",
+      "room": "Kitchen",
+      "floor": 0,
+      "x": 2.2,
+      "y": -1.9
+    },
+    {
+      "entity_id": "binary_sensor.back_door_contact",
+      "room": "Family Room",
+      "floor": 0,
+      "x": 2.2,
+      "y": 3.4
+    },
+    {
+      "entity_id": "binary_sensor.garage_entry_contact",
+      "room": "Garage",
+      "floor": 0,
+      "x": -2.6,
+      "y": 3.3
+    },
+    {
+      "entity_id": "binary_sensor.basement_motion",
+      "room": "Family Room",
+      "floor": 0,
+      "x": 1.3,
+      "y": 1.9
+    },
+    {
+      "entity_id": "binary_sensor.driveway_person",
+      "room": "Living Room",
+      "floor": 0,
+      "x": -1.2,
+      "y": -3.4
+    },
+    {
+      "entity_id": "binary_sensor.water_heater_leak",
+      "room": "Garage",
+      "floor": 0,
+      "x": -3.2,
+      "y": 1.4
+    },
+    {
+      "entity_id": "binary_sensor.sump_pit_leak",
+      "room": "Garage",
+      "floor": 0,
+      "x": -1.7,
+      "y": 1.4
+    },
+    {
+      "entity_id": "binary_sensor.hallway_motion",
+      "room": "Landing / Hall",
+      "floor": 1,
+      "x": 1.3,
+      "y": 1.9
+    },
+    {
+      "entity_id": "binary_sensor.laundry_leak",
+      "room": "Bath",
+      "floor": 1,
+      "x": -2.4,
+      "y": 1.9
+    },
+    {
+      "entity_id": "binary_sensor.smoke_co_bridge",
+      "room": "Bedroom 2",
+      "floor": 1,
+      "x": 2.2,
+      "y": -1.9
+    }
+  ],
+  "settings": {
+    "home_name": "Fort Knox",
+    "latitude": "",
+    "longitude": "",
+    "timezone": "America/New_York"
+  }
+}

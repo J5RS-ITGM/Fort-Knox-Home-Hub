@@ -4,3 +4,6 @@ node_modules/
 .venv/
 __pycache__/
 *.db
+seed.json
+seed.json
+backend/seed.json

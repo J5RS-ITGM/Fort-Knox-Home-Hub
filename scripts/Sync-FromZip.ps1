@@ -7,7 +7,7 @@
   (robocopy /MIR), then commits and pushes. Mirroring means files deleted
   in the session are deleted locally too. Protected from the mirror (never
   copied, never deleted): .git, node_modules, .venv, .next, __pycache__,
-  .env files, and *.db — so local installs, secrets, and git history are
+  .env files, and *.db - so local installs, secrets, and git history are
   untouched.
 
 .EXAMPLE
@@ -16,7 +16,7 @@
   .\scripts\Sync-FromZip.ps1 -Zip $HOME\Downloads\homehub.zip -NoPush   # commit only
 #>
 param(
-  [Parameter(Mandatory = $true)][string]$Zip,
+  [string]$Zip,
   [string]$Message = ("Sync from Claude session " + (Get-Date -Format "yyyy-MM-dd HH:mm")),
   [switch]$NoPush
 )
@@ -24,6 +24,14 @@ param(
 $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot   # repo root (this script lives in scripts/)
 
+if (-not $Zip) {
+  # No -Zip given: use the newest fortknox-*.zip in Downloads
+  $latest = Get-ChildItem "$HOME\Downloads\fortknox-*.zip" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if (-not $latest) { throw "No fortknox-*.zip found in Downloads and no -Zip given" }
+  $Zip = $latest.FullName
+  Write-Host "Using newest zip: $($latest.Name)"
+}
 if (-not (Test-Path $Zip)) { throw "Zip not found: $Zip" }
 if (-not (Test-Path (Join-Path $Repo ".git"))) { throw "Not a git repo: $Repo" }
 
@@ -47,7 +55,7 @@ Push-Location $Repo
 try {
   git add -A
   $pending = git status --porcelain
-  if (-not $pending) { Write-Host "Nothing to commit — repo already matches the zip."; return }
+  if (-not $pending) { Write-Host "Nothing to commit - repo already matches the zip."; return }
   git commit -m $Message
   if (-not $NoPush) { git push }
   Write-Host "Done: committed$(if (-not $NoPush) { ' and pushed' })."

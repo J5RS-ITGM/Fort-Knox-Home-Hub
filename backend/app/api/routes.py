@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
 from ..auth import audit, get_current_user
+from .. import allowlist
+from ..bridge import manager
 from ..config import get_settings
 from ..db import get_session
 from ..ha.state import cache
@@ -22,16 +24,6 @@ from ..schemas import (
 router = APIRouter(prefix="/api")
 protected = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 
-# Domains and services the app is allowed to forward. Everything else is
-# rejected — the dashboard is a control surface, not a raw HA console.
-ALLOWED_SERVICES: dict[str, set[str]] = {
-    "switch": {"turn_on", "turn_off", "toggle"},
-    "light": {"turn_on", "turn_off", "toggle"},
-    "lock": {"lock", "unlock"},
-    "valve": {"open_valve", "close_valve"},
-    "climate": {"set_temperature"},
-    "alarm_control_panel": {"alarm_disarm", "alarm_arm_home", "alarm_arm_away"},
-}
 
 
 # -- health ------------------------------------------------------------------
@@ -40,7 +32,7 @@ async def health() -> HealthOut:
     settings = get_settings()
     return HealthOut(
         status="ok",
-        mode="mock" if settings.ha_mock else "live",
+        mode=manager.mode,
         ha_connected=cache.ha_connected,
         entity_count=len(cache),
     )
@@ -70,11 +62,13 @@ async def call_service(
     user: models.User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    if domain not in ALLOWED_SERVICES or service not in ALLOWED_SERVICES[domain]:
+    if not allowlist.is_allowed(domain, service):
         raise HTTPException(403, f"service {domain}.{service} is not exposed by this app")
     if not cache.get(body.entity_id):
         raise HTTPException(404, f"unknown entity: {body.entity_id}")
-    bridge = request.app.state.bridge
+    bridge = manager.bridge
+    if bridge is None:
+        raise HTTPException(503, "bridge not running")
     try:
         await bridge.call_service(domain, service, body.entity_id, body.data)
     except Exception as exc:  # noqa: BLE001
@@ -109,6 +103,18 @@ async def upsert_placement(
     await session.commit()
     await session.refresh(placement)
     return placement
+
+
+@protected.delete("/placements/{entity_id}", status_code=204)
+async def delete_placement(entity_id: str, session: AsyncSession = Depends(get_session)) -> None:
+    result = await session.execute(
+        select(models.SensorPlacement).where(models.SensorPlacement.entity_id == entity_id)
+    )
+    placement = result.scalar_one_or_none()
+    if placement is None:
+        raise HTTPException(404, "no placement for that entity")
+    await session.delete(placement)
+    await session.commit()
 
 
 # -- panel layouts -----------------------------------------------------------

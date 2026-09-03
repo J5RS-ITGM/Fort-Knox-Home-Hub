@@ -15,7 +15,6 @@ from typing import Any
 import httpx
 import websockets
 
-from ..config import get_settings
 from .state import Entity, cache
 
 log = logging.getLogger("homehub.ha")
@@ -36,10 +35,16 @@ def _parse_entity(raw: dict[str, Any]) -> Entity:
 
 
 class HAClient:
-    def __init__(self) -> None:
-        self.settings = get_settings()
+    def __init__(self, url: str, token: str) -> None:
+        self.url = url.rstrip("/")
+        self.token = token
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+
+    @property
+    def ws_url(self) -> str:
+        base = self.url.replace("http://", "ws://").replace("https://", "wss://")
+        return f"{base}/api/websocket"
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="ha-bridge")
@@ -69,14 +74,14 @@ class HAClient:
             backoff = min(backoff * 2, 30.0)
 
     async def _session(self) -> None:
-        url = self.settings.ha_ws_url
+        url = self.ws_url
         log.info("Connecting to Home Assistant at %s", url)
         async with websockets.connect(url, max_size=8 * 1024 * 1024) as ws:
             # -- auth handshake ------------------------------------------------
             hello = json.loads(await ws.recv())
             if hello.get("type") != "auth_required":
                 raise RuntimeError(f"unexpected greeting: {hello}")
-            await ws.send(json.dumps({"type": "auth", "access_token": self.settings.ha_token}))
+            await ws.send(json.dumps({"type": "auth", "access_token": self.token}))
             reply = json.loads(await ws.recv())
             if reply.get("type") != "auth_ok":
                 raise RuntimeError("HA auth failed — check HA_TOKEN")
@@ -104,8 +109,8 @@ class HAClient:
         payload = {"entity_id": entity_id, **data}
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
-                f"{self.settings.ha_url.rstrip('/')}/api/services/{domain}/{service}",
-                headers={"Authorization": f"Bearer {self.settings.ha_token}"},
+                f"{self.url}/api/services/{domain}/{service}",
+                headers={"Authorization": f"Bearer {self.token}"},
                 json=payload,
             )
             resp.raise_for_status()

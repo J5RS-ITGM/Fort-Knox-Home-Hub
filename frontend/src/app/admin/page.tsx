@@ -2,156 +2,417 @@
 
 import { useCallback, useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
-import { api, AuditRow, User } from "@/lib/api";
+import { api, AuditRow, Entity, User } from "@/lib/api";
+
+interface AllowRule { id: string; domain: string; service: string; note: string }
+interface Family { id: string; name: string; emoji: string; color: string; sort: number; user_id: string | null }
+interface Placement { id: string; entity_id: string; room: string; floor: number; x: number; y: number; icon: string | null }
+interface Setting { key: string; value: string }
 
 const input =
   "rounded-md border border-line bg-panel px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-muted/60 focus:border-lamp/60";
 const btn =
   "rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink disabled:opacity-50";
+const primary =
+  "rounded-md bg-lamp px-3 py-2 text-xs font-semibold text-field transition-opacity hover:opacity-90 disabled:opacity-50";
+const th = "px-3 py-2 font-medium text-left text-[11px] uppercase tracking-wider text-ink-muted";
+const sectionTitle = "mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted";
+
+const TABS = ["Users", "Family", "Devices", "Allowlist", "HA Bridge", "Settings", "Audit"] as const;
+type Tab = (typeof TABS)[number];
 
 function AdminInner() {
-  const [users, setUsers] = useState<User[]>([]);
-  const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [tab, setTab] = useState<Tab>("Users");
   const [error, setError] = useState("");
-
-  const [nu, setNu] = useState({ username: "", password: "", display_name: "", role: "member" });
   const [busy, setBusy] = useState(false);
 
-  const refresh = useCallback(async () => {
-    const [u, a] = await Promise.all([
-      api("/api/admin/users").then((r) => (r.ok ? r.json() : [])),
-      api("/api/admin/audit?limit=100").then((r) => (r.ok ? r.json() : [])),
-    ]);
-    setUsers(u);
-    setAudit(a);
-  }, []);
+  const [users, setUsers] = useState<User[]>([]);
+  const [family, setFamily] = useState<Family[]>([]);
+  const [placements, setPlacements] = useState<Placement[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [rules, setRules] = useState<AllowRule[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [audit, setAudit] = useState<AuditRow[]>([]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const refresh = useCallback(async () => {
+    const j = (r: Response) => (r.ok ? r.json() : []);
+    const [u, f, p, e, al, st, au] = await Promise.all([
+      api("/api/admin/users").then(j),
+      api("/api/admin/family").then(j),
+      api("/api/placements").then(j),
+      api("/api/entities").then(j),
+      api("/api/admin/allowlist").then(j),
+      api("/api/admin/settings").then(j),
+      api("/api/admin/audit?limit=100").then(j),
+    ]);
+    setUsers(u); setFamily(f); setPlacements(p); setEntities(e); setRules(al); setAudit(au);
+    setSettings(Object.fromEntries((st as Setting[]).map((s) => [s.key, s.value])));
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
 
   const act = async (fn: () => Promise<Response>) => {
-    setError("");
-    setBusy(true);
+    setError(""); setBusy(true);
     try {
       const res = await fn();
       if (!res.ok) setError((await res.json().catch(() => null))?.detail ?? `Failed (${res.status})`);
       await refresh();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const createUser = () =>
-    act(() => api("/api/admin/users", { method: "POST", body: JSON.stringify(nu) })).then(() =>
-      setNu({ username: "", password: "", display_name: "", role: "member" }),
-    );
-
-  const patch = (id: string, body: Record<string, unknown>) =>
-    act(() => api(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }));
-
-  const resetPassword = (u: User) => {
-    const pw = window.prompt(`New password for ${u.username} (10+ chars):`);
-    if (pw) patch(u.id, { password: pw });
+      return res.ok;
+    } finally { setBusy(false); }
   };
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">
-      <div className="mb-6 flex items-center gap-3">
+      <div className="mb-5 flex items-center gap-3">
         <a href="/" className={btn}>← Dashboard</a>
         <h1 className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-wide">Admin</h1>
       </div>
 
+      <div className="mb-6 flex flex-wrap gap-1.5">
+        {TABS.map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === t ? "bg-panel-raised text-ink border border-lamp/40" : "border border-line text-ink-muted hover:text-ink"}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
       {error && <p className="mb-4 rounded-md border border-alert/40 bg-panel p-3 text-sm text-alert">{error}</p>}
 
-      <section className="mb-10">
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Users</h2>
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-[11px] uppercase tracking-wider text-ink-muted">
-                <th className="px-3 py-2 font-medium">User</th>
-                <th className="px-3 py-2 font-medium">Role</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-b border-line/60 last:border-0">
-                  <td className="px-3 py-2.5">
-                    <div className="font-medium">{u.display_name || u.username}</div>
-                    <div className="font-[family-name:var(--font-mono)] text-[11px] text-ink-muted">{u.username}</div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={u.role === "admin" ? "text-lamp" : "text-ink-muted"}>{u.role}</span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={u.disabled ? "text-alert" : "text-ok"}>{u.disabled ? "disabled" : "active"}</span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex flex-wrap gap-1.5">
-                      <button disabled={busy} className={btn}
-                        onClick={() => patch(u.id, { role: u.role === "admin" ? "member" : "admin" })}>
-                        {u.role === "admin" ? "Make member" : "Make admin"}
-                      </button>
-                      <button disabled={busy} className={btn}
-                        onClick={() => patch(u.id, { disabled: !u.disabled })}>
-                        {u.disabled ? "Enable" : "Disable"}
-                      </button>
-                      <button disabled={busy} className={btn} onClick={() => resetPassword(u)}>
-                        Reset password
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <input className={input} placeholder="Username" autoCapitalize="none"
-            value={nu.username} onChange={(e) => setNu({ ...nu, username: e.target.value })} />
-          <input className={input} placeholder="Display name"
-            value={nu.display_name} onChange={(e) => setNu({ ...nu, display_name: e.target.value })} />
-          <input className={input} type="password" placeholder="Password (10+)"
-            value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
-          <select className={input} value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
-            <option value="member">member</option>
-            <option value="admin">admin</option>
-          </select>
-          <button disabled={busy || !nu.username || !nu.password} onClick={createUser}
-            className="rounded-md bg-lamp px-3 py-2 text-xs font-semibold text-field transition-opacity hover:opacity-90 disabled:opacity-50">
-            Add user
-          </button>
-        </div>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
-          Audit log <span className="normal-case tracking-normal">(latest 100)</span>
-        </h2>
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full text-sm">
-            <tbody>
-              {audit.map((r) => (
-                <tr key={r.id} className="border-b border-line/60 last:border-0">
-                  <td className="whitespace-nowrap px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-ink-muted">
-                    {new Date(r.ts).toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2 font-medium">{r.username}</td>
-                  <td className="px-3 py-2">
-                    <span className={r.action.includes("failed") ? "text-alert" : "text-ink"}>{r.action}</span>
-                  </td>
-                  <td className="px-3 py-2 text-ink-muted">{r.detail}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      {tab === "Users" && <UsersTab {...{ users, busy, act }} />}
+      {tab === "Family" && <FamilyTab {...{ family, users, busy, act }} />}
+      {tab === "Devices" && <DevicesTab {...{ placements, entities, busy, act }} />}
+      {tab === "Allowlist" && <AllowlistTab {...{ rules, busy, act }} />}
+      {tab === "HA Bridge" && <HABridgeTab {...{ busy, act }} />}
+      {tab === "Settings" && <SettingsTab {...{ settings, busy, act }} />}
+      {tab === "Audit" && <AuditTab audit={audit} />}
     </main>
+  );
+}
+
+// ---------------------------------------------------------------- Users
+function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+  const [nu, setNu] = useState({ username: "", password: "", display_name: "", role: "member" });
+  const patch = (id: string, body: Record<string, unknown>) =>
+    act(() => api(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }));
+  return (
+    <section>
+      <h2 className={sectionTitle}>Login accounts</h2>
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-line"><th className={th}>User</th><th className={th}>Role</th><th className={th}>Status</th><th className={th}>Actions</th></tr></thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id} className="border-b border-line/60 last:border-0">
+                <td className="px-3 py-2.5">
+                  <div className="font-medium">{u.display_name || u.username}</div>
+                  <div className="font-[family-name:var(--font-mono)] text-[11px] text-ink-muted">{u.username}</div>
+                </td>
+                <td className="px-3 py-2.5"><span className={u.role === "admin" ? "text-lamp" : "text-ink-muted"}>{u.role}</span></td>
+                <td className="px-3 py-2.5"><span className={u.disabled ? "text-alert" : "text-ok"}>{u.disabled ? "disabled" : "active"}</span></td>
+                <td className="px-3 py-2.5">
+                  <div className="flex flex-wrap gap-1.5">
+                    <button disabled={busy} className={btn} onClick={() => patch(u.id, { role: u.role === "admin" ? "member" : "admin" })}>
+                      {u.role === "admin" ? "Make member" : "Make admin"}
+                    </button>
+                    <button disabled={busy} className={btn} onClick={() => patch(u.id, { disabled: !u.disabled })}>
+                      {u.disabled ? "Enable" : "Disable"}
+                    </button>
+                    <button disabled={busy} className={btn} onClick={() => { const pw = window.prompt(`New password for ${u.username} (10+ chars):`); if (pw) patch(u.id, { password: pw }); }}>
+                      Reset password
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <input className={input} placeholder="Username" autoCapitalize="none" value={nu.username} onChange={(e) => setNu({ ...nu, username: e.target.value })} />
+        <input className={input} placeholder="Display name" value={nu.display_name} onChange={(e) => setNu({ ...nu, display_name: e.target.value })} />
+        <input className={input} type="password" placeholder="Password (10+)" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
+        <select className={input} value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
+          <option value="member">member</option><option value="admin">admin</option>
+        </select>
+        <button disabled={busy || !nu.username || !nu.password} className={primary}
+          onClick={() => act(() => api("/api/admin/users", { method: "POST", body: JSON.stringify(nu) })).then((ok) => ok && setNu({ username: "", password: "", display_name: "", role: "member" }))}>
+          Add user
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Family
+function FamilyTab({ family, users, busy, act }: { family: Family[]; users: User[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+  const [nf, setNf] = useState({ name: "", emoji: "🙂", color: "#6b8afd" });
+  const patch = (m: Family, body: Partial<Family>) =>
+    act(() => api(`/api/admin/family/${m.id}`, { method: "PATCH", body: JSON.stringify(body) }));
+  return (
+    <section>
+      <h2 className={sectionTitle}>Household roster <span className="normal-case tracking-normal">(Chore Quest, panels — no login needed)</span></h2>
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-line"><th className={th}>Member</th><th className={th}>Color</th><th className={th}>Linked account</th><th className={th}>Actions</th></tr></thead>
+          <tbody>
+            {family.map((m) => (
+              <tr key={m.id} className="border-b border-line/60 last:border-0">
+                <td className="px-3 py-2.5"><span className="mr-2 text-lg">{m.emoji}</span><span className="font-medium">{m.name}</span></td>
+                <td className="px-3 py-2.5">
+                  <input type="color" value={m.color} disabled={busy} className="h-6 w-10 cursor-pointer rounded border border-line bg-transparent"
+                    onChange={(e) => patch(m, { color: e.target.value })} />
+                </td>
+                <td className="px-3 py-2.5">
+                  <select className={input} value={m.user_id ?? ""} disabled={busy}
+                    onChange={(e) => patch(m, { user_id: e.target.value || null })}>
+                    <option value="">— none —</option>
+                    {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-2.5">
+                  <div className="flex gap-1.5">
+                    <button disabled={busy} className={btn} onClick={() => { const em = window.prompt("Emoji:", m.emoji); if (em) patch(m, { emoji: em }); }}>Emoji</button>
+                    <button disabled={busy} className={btn} onClick={() => { if (window.confirm(`Remove ${m.name} from the roster?`)) act(() => api(`/api/admin/family/${m.id}`, { method: "DELETE" })); }}>Remove</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <input className={input} placeholder="Name" value={nf.name} onChange={(e) => setNf({ ...nf, name: e.target.value })} />
+        <input className={`${input} w-16 text-center`} value={nf.emoji} onChange={(e) => setNf({ ...nf, emoji: e.target.value })} />
+        <input type="color" value={nf.color} className="h-9 w-12 cursor-pointer rounded-md border border-line bg-transparent" onChange={(e) => setNf({ ...nf, color: e.target.value })} />
+        <button disabled={busy || !nf.name} className={primary}
+          onClick={() => act(() => api("/api/admin/family", { method: "POST", body: JSON.stringify({ ...nf, sort: family.length }) })).then((ok) => ok && setNf({ name: "", emoji: "🙂", color: "#6b8afd" }))}>
+          Add member
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Devices
+function DevicesTab({ placements, entities, busy, act }: { placements: Placement[]; entities: Entity[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+  const placed = new Set(placements.map((p) => p.entity_id));
+  const unplaced = entities.filter((e) => e.domain === "binary_sensor" && !placed.has(e.entity_id));
+  const [sel, setSel] = useState("");
+  const save = (p: Placement, body: Partial<Placement>) =>
+    act(() => api(`/api/placements/${p.entity_id}`, { method: "PUT", body: JSON.stringify({ ...p, ...body }) }));
+  return (
+    <section>
+      <h2 className={sectionTitle}>Sensor placements <span className="normal-case tracking-normal">(drag mode also available on the Security board)</span></h2>
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-line"><th className={th}>Entity</th><th className={th}>Room</th><th className={th}>Floor</th><th className={th}>X</th><th className={th}>Y</th><th className={th}>Live</th><th className={th}></th></tr></thead>
+          <tbody>
+            {placements.map((p) => {
+              const ent = entities.find((e) => e.entity_id === p.entity_id);
+              return (
+                <tr key={p.id} className="border-b border-line/60 last:border-0">
+                  <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-[11px]">{p.entity_id}</td>
+                  <td className="px-3 py-2">
+                    <input className={`${input} w-32 py-1`} defaultValue={p.room} onBlur={(e) => e.target.value !== p.room && save(p, { room: e.target.value })} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <select className={`${input} py-1`} value={p.floor} disabled={busy} onChange={(e) => save(p, { floor: Number(e.target.value) })}>
+                      <option value={0}>Ground</option><option value={1}>Upstairs</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2"><input className={`${input} w-20 py-1`} type="number" step="0.1" defaultValue={p.x} onBlur={(e) => Number(e.target.value) !== p.x && save(p, { x: Number(e.target.value) })} /></td>
+                  <td className="px-3 py-2"><input className={`${input} w-20 py-1`} type="number" step="0.1" defaultValue={p.y} onBlur={(e) => Number(e.target.value) !== p.y && save(p, { y: Number(e.target.value) })} /></td>
+                  <td className="px-3 py-2">
+                    {ent ? <span className={ent.state === "on" ? "text-alert" : "text-ok"}>{ent.state === "on" ? "active" : "clear"}</span>
+                         : <span className="text-ink-muted">offline</span>}
+                  </td>
+                  <td className="px-3 py-2">
+                    <button disabled={busy} className={btn} onClick={() => window.confirm(`Remove placement for ${p.entity_id}?`) && act(() => api(`/api/placements/${p.entity_id}`, { method: "DELETE" }))}>Remove</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <select className={input} value={sel} onChange={(e) => setSel(e.target.value)}>
+          <option value="">Add unplaced sensor…</option>
+          {unplaced.map((e) => <option key={e.entity_id} value={e.entity_id}>{e.friendly_name} ({e.entity_id})</option>)}
+        </select>
+        <button disabled={busy || !sel} className={primary}
+          onClick={() => act(() => api(`/api/placements/${sel}`, { method: "PUT", body: JSON.stringify({ entity_id: sel, room: "", floor: 0, x: 0, y: 0 }) })).then((ok) => ok && setSel(""))}>
+          Place at origin
+        </button>
+        <span className="text-xs text-ink-muted">then drag it into position on the Security board</span>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Allowlist
+function AllowlistTab({ rules, busy, act }: { rules: AllowRule[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+  const [nr, setNr] = useState({ domain: "", service: "", note: "" });
+  return (
+    <section>
+      <h2 className={sectionTitle}>Service allowlist</h2>
+      <p className="mb-4 max-w-2xl text-xs leading-relaxed text-ink-muted">
+        The only HA services this app will ever forward. Treat additions like firewall rules: every one widens
+        what a signed-in session can make the house do, takes effect immediately, and is audit-logged.
+      </p>
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-line"><th className={th}>Service</th><th className={th}>Note</th><th className={th}></th></tr></thead>
+          <tbody>
+            {rules.map((r) => (
+              <tr key={r.id} className="border-b border-line/60 last:border-0">
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-[12px]">{r.domain}.{r.service}</td>
+                <td className="px-3 py-2 text-ink-muted">{r.note}</td>
+                <td className="px-3 py-2 text-right">
+                  <button disabled={busy} className={btn}
+                    onClick={() => window.confirm(`Remove ${r.domain}.${r.service}? Calls will 403 immediately.`) && act(() => api(`/api/admin/allowlist/${r.id}`, { method: "DELETE" }))}>
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <input className={input} placeholder="domain (e.g. cover)" value={nr.domain} onChange={(e) => setNr({ ...nr, domain: e.target.value })} />
+        <input className={input} placeholder="service (e.g. open_cover)" value={nr.service} onChange={(e) => setNr({ ...nr, service: e.target.value })} />
+        <input className={`${input} flex-1 min-w-40`} placeholder="Why is this needed?" value={nr.note} onChange={(e) => setNr({ ...nr, note: e.target.value })} />
+        <button disabled={busy || !nr.domain || !nr.service || !nr.note} className={primary}
+          onClick={() => act(() => api("/api/admin/allowlist", { method: "POST", body: JSON.stringify(nr) })).then((ok) => ok && setNr({ domain: "", service: "", note: "" }))}>
+          Allow service
+        </button>
+      </div>
+      <p className="mt-2 text-[11px] text-ink-muted">A note is required — future-you audits this list.</p>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- HA Bridge
+interface HASettings { ha_url: string; ha_mock: boolean; token_set: boolean; mode: string }
+function HABridgeTab({ busy, act }: { busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+  const [cfg, setCfg] = useState<HASettings | null>(null);
+  const [url, setUrl] = useState("");
+  const [mock, setMock] = useState(true);
+  const [token, setToken] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await api("/api/admin/settings/ha");
+    if (res.ok) {
+      const d: HASettings = await res.json();
+      setCfg(d); setUrl(d.ha_url); setMock(d.ha_mock);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = () =>
+    act(() => api("/api/admin/settings/ha", {
+      method: "PUT",
+      body: JSON.stringify({ ha_url: url, ha_mock: mock, ...(token ? { ha_token: token } : {}) }),
+    })).then((ok) => { if (ok) { setToken(""); load(); } });
+
+  const restart = () =>
+    act(() => api("/api/admin/bridge/restart", { method: "POST" })).then(() => load());
+
+  if (!cfg) return <p className="text-sm text-ink-muted">…</p>;
+  return (
+    <section>
+      <h2 className={sectionTitle}>Home Assistant bridge</h2>
+      <div className="mb-5 flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3">
+        <span className={`inline-block size-2 rounded-full ${cfg.mode === "live" ? "bg-ok" : "bg-lamp"} lamp-live`} />
+        <span className="text-sm">
+          Bridge mode: <span className="font-semibold">{cfg.mode}</span>
+          {cfg.mode === "mock" && <span className="text-ink-muted"> — simulated devices, no HA needed</span>}
+        </span>
+      </div>
+      <div className="flex max-w-md flex-col gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-ink-muted">HA URL (across your WireGuard/Tailscale tunnel — never a port-forwarded HA)</span>
+          <input className={input} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://100.x.y.z:8123" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-ink-muted">
+            Long-lived access token {cfg.token_set && <span className="text-ok">(set — enter a value only to replace it)</span>}
+          </span>
+          <input className={input} type="password" value={token} onChange={(e) => setToken(e.target.value)}
+            placeholder={cfg.token_set ? "••••••••  (write-only, never displayed)" : "paste HA long-lived token"} />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={mock} onChange={(e) => setMock(e.target.checked)} className="accent-[#e8a33d]" />
+          Mock mode (simulated devices)
+        </label>
+        <div className="mt-1 flex gap-2">
+          <button disabled={busy} className={primary} onClick={save}>Save</button>
+          <button disabled={busy} className={btn} onClick={restart}>Restart bridge</button>
+        </div>
+        <p className="text-[11px] leading-relaxed text-ink-muted">
+          Saving stores the token server-side; it is never returned by any API. Restart applies the new
+          config without redeploying. To go live: tunnel up → URL + token here → uncheck mock → restart.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Settings
+function SettingsTab({ settings, busy, act }: { settings: Record<string, string>; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+  const [form, setForm] = useState(settings);
+  useEffect(() => setForm(settings), [settings]);
+  const fields: [string, string, string][] = [
+    ["home_name", "Home name", "Fort Knox"],
+    ["latitude", "Latitude", "for weather/radar"],
+    ["longitude", "Longitude", "for weather/radar"],
+    ["timezone", "Timezone", "America/New_York"],
+  ];
+  return (
+    <section>
+      <h2 className={sectionTitle}>App settings</h2>
+      <div className="flex max-w-md flex-col gap-3">
+        {fields.map(([key, label, ph]) => (
+          <label key={key} className="flex flex-col gap-1">
+            <span className="text-xs text-ink-muted">{label}</span>
+            <input className={input} placeholder={ph} value={form[key] ?? ""} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+          </label>
+        ))}
+        <button disabled={busy} className={`${primary} mt-1 self-start`}
+          onClick={() => act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values: form }) }))}>
+          Save settings
+        </button>
+        <p className="text-[11px] leading-relaxed text-ink-muted">
+          Secrets never live here: the HA token, database credentials, and cookie settings are environment-only
+          (server <span className="font-[family-name:var(--font-mono)]">.env</span>), by design.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Audit
+function AuditTab({ audit }: { audit: AuditRow[] }) {
+  return (
+    <section>
+      <h2 className={sectionTitle}>Audit log <span className="normal-case tracking-normal">(latest 100)</span></h2>
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full text-sm">
+          <tbody>
+            {audit.map((r) => (
+              <tr key={r.id} className="border-b border-line/60 last:border-0">
+                <td className="whitespace-nowrap px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] text-ink-muted">{new Date(r.ts).toLocaleString()}</td>
+                <td className="px-3 py-2 font-medium">{r.username}</td>
+                <td className="px-3 py-2"><span className={r.action.includes("failed") ? "text-alert" : "text-ink"}>{r.action}</span></td>
+                <td className="px-3 py-2 text-ink-muted">{r.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

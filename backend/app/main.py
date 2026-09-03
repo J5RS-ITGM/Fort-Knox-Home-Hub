@@ -12,13 +12,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401 — register models with Base.metadata
+from . import allowlist
 from .api.auth_routes import admin_router, auth_router
 from .api.routes import protected as protected_router
 from .api.routes import router as api_router
 from .config import get_settings
 from .db import Base, engine
-from .ha.client import HAClient
-from .ha.mock import MockHA
+from .bridge import manager
 from .ws import router as ws_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -34,14 +34,16 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(Base.metadata.create_all)
         log.info("Database tables ensured (%s)", settings.database_url.split("://")[0])
 
-    bridge = MockHA() if settings.ha_mock else HAClient()
-    app.state.bridge = bridge
-    bridge.start()
-    log.info("HA bridge started in %s mode", "mock" if settings.ha_mock else "live")
+    from .db import SessionLocal
+    async with SessionLocal() as db:
+        await allowlist.ensure_seeded(db)
+
+    await manager.start()
+    app.state.manager = manager
 
     yield
 
-    await bridge.stop()
+    await manager.stop()
     await engine.dispose()
 
 

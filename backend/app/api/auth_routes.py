@@ -195,3 +195,189 @@ async def list_audit(limit: int = 100, db: AsyncSession = Depends(get_session)) 
     limit = max(1, min(limit, 500))
     result = await db.execute(select(models.AuditLog).order_by(models.AuditLog.id.desc()).limit(limit))
     return list(result.scalars())
+
+
+# -- admin: HA bridge configuration ------------------------------------------
+from ..bridge import effective_ha_config, manager, put_setting  # noqa: E402
+from ..schemas import FamilyIn, FamilyOut, FamilyPatch, HASettingsIn, HASettingsOut  # noqa: E402
+
+
+@admin_router.get("/settings/ha", response_model=HASettingsOut)
+async def get_ha_settings(db: AsyncSession = Depends(get_session)) -> HASettingsOut:
+    cfg = await effective_ha_config(db)
+    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], mode=manager.mode)
+
+
+@admin_router.put("/settings/ha", response_model=HASettingsOut)
+async def put_ha_settings(
+    body: HASettingsIn,
+    admin=Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> HASettingsOut:
+    changes: list[str] = []
+    if body.ha_url is not None:
+        await put_setting(db, "ha_url", body.ha_url.strip())
+        changes.append("ha_url")
+    if body.ha_mock is not None:
+        await put_setting(db, "ha_mock", "true" if body.ha_mock else "false")
+        changes.append(f"ha_mock={body.ha_mock}")
+    if body.ha_token:
+        await put_setting(db, "ha_token", body.ha_token)
+        changes.append("ha_token(updated)")
+    await audit(db, admin.username, "ha_settings", ", ".join(changes) or "no-op")
+    cfg = await effective_ha_config(db)
+    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], mode=manager.mode)
+
+
+@admin_router.post("/bridge/restart", response_model=HASettingsOut)
+async def restart_bridge(admin=Depends(require_admin), db: AsyncSession = Depends(get_session)) -> HASettingsOut:
+    mode = await manager.restart()
+    await audit(db, admin.username, "bridge_restart", f"now {mode}")
+    cfg = await effective_ha_config(db)
+    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], mode=mode)
+
+
+# -- admin: household roster --------------------------------------------------
+@admin_router.get("/family", response_model=list[FamilyOut])
+async def list_family(db: AsyncSession = Depends(get_session)) -> list[models.FamilyMember]:
+    result = await db.execute(select(models.FamilyMember).order_by(models.FamilyMember.sort, models.FamilyMember.created_at))
+    return list(result.scalars())
+
+
+@admin_router.post("/family", response_model=FamilyOut, status_code=201)
+async def create_family(body: FamilyIn, admin=Depends(require_admin), db: AsyncSession = Depends(get_session)) -> models.FamilyMember:
+    m = models.FamilyMember(name=body.name.strip(), emoji=body.emoji, color=body.color, sort=body.sort, user_id=body.user_id)
+    db.add(m)
+    await db.commit()
+    await db.refresh(m)
+    await audit(db, admin.username, "family_added", m.name)
+    return m
+
+
+@admin_router.patch("/family/{member_id}", response_model=FamilyOut)
+async def patch_family(member_id: str, body: FamilyPatch, admin=Depends(require_admin), db: AsyncSession = Depends(get_session)) -> models.FamilyMember:
+    m = await db.get(models.FamilyMember, member_id)
+    if m is None:
+        raise HTTPException(404, "no such member")
+    for field in ("name", "emoji", "color", "sort"):
+        v = getattr(body, field)
+        if v is not None:
+            setattr(m, field, v)
+    if "user_id" in body.model_fields_set:  # allow explicit null to unlink
+        m.user_id = body.user_id
+    await db.commit()
+    await db.refresh(m)
+    await audit(db, admin.username, "family_updated", m.name)
+    return m
+
+
+@admin_router.delete("/family/{member_id}", status_code=204)
+async def delete_family(member_id: str, admin=Depends(require_admin), db: AsyncSession = Depends(get_session)) -> None:
+    m = await db.get(models.FamilyMember, member_id)
+    if m is None:
+        raise HTTPException(404, "no such member")
+    await db.delete(m)
+    await db.commit()
+    await audit(db, admin.username, "family_removed", m.name)
+
+
+# -- admin: placements delete -------------------------------------------------
+@admin_router.delete("/placements/{entity_id}", status_code=204)
+async def delete_placement(entity_id: str, admin=Depends(require_admin), db: AsyncSession = Depends(get_session)) -> None:
+    result = await db.execute(select(models.SensorPlacement).where(models.SensorPlacement.entity_id == entity_id))
+    p = result.scalar_one_or_none()
+    if p is None:
+        raise HTTPException(404, "no such placement")
+    await db.delete(p)
+    await db.commit()
+    await audit(db, admin.username, "placement_deleted", entity_id)
+
+
+# -- admin: service allowlist ------------------------------------------------
+from .. import allowlist as allowlist_mod  # noqa: E402
+from ..schemas import AllowIn, AllowOut, SettingOut, SettingsIn  # noqa: E402
+
+_SERVICE_RE = r"^[a-z_][a-z0-9_]*$"
+
+
+@admin_router.get("/allowlist", response_model=list[AllowOut])
+async def list_allowlist(db: AsyncSession = Depends(get_session)) -> list[models.ServiceAllow]:
+    result = await db.execute(
+        select(models.ServiceAllow).order_by(models.ServiceAllow.domain, models.ServiceAllow.service)
+    )
+    return list(result.scalars())
+
+
+@admin_router.post("/allowlist", response_model=AllowOut, status_code=201)
+async def add_allow(
+    body: AllowIn,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> models.ServiceAllow:
+    import re
+    domain, service = body.domain.strip().lower(), body.service.strip().lower()
+    if not re.match(_SERVICE_RE, domain) or not re.match(_SERVICE_RE, service):
+        raise HTTPException(422, "domain and service must be lowercase identifiers")
+    exists = (
+        await db.execute(
+            select(models.ServiceAllow).where(
+                models.ServiceAllow.domain == domain, models.ServiceAllow.service == service
+            )
+        )
+    ).scalar_one_or_none()
+    if exists:
+        raise HTTPException(409, "already allowed")
+    row = models.ServiceAllow(domain=domain, service=service, note=body.note)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    await allowlist_mod.refresh(db)
+    await audit(db, admin.username, "allowlist_added", f"{domain}.{service} ({body.note or 'no note'})")
+    return row
+
+
+@admin_router.delete("/allowlist/{allow_id}", status_code=204)
+async def remove_allow(
+    allow_id: str,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> None:
+    row = await db.get(models.ServiceAllow, allow_id)
+    if row is None:
+        raise HTTPException(404, "no such rule")
+    await db.delete(row)
+    await db.commit()
+    await allowlist_mod.refresh(db)
+    await audit(db, admin.username, "allowlist_removed", f"{row.domain}.{row.service}")
+
+
+# -- admin: app settings (non-secret) ----------------------------------------
+SETTING_KEYS = {"home_name", "latitude", "longitude", "timezone"}
+
+
+@admin_router.get("/settings", response_model=list[SettingOut])
+async def list_settings(db: AsyncSession = Depends(get_session)) -> list[models.AppSetting]:
+    result = await db.execute(select(models.AppSetting).order_by(models.AppSetting.key))
+    return list(result.scalars())
+
+
+@admin_router.put("/settings", response_model=list[SettingOut])
+async def put_settings(
+    body: SettingsIn,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> list[models.AppSetting]:
+    bad = set(body.values) - SETTING_KEYS
+    if bad:
+        raise HTTPException(422, f"unknown setting keys: {', '.join(sorted(bad))}")
+    for key, value in body.values.items():
+        row = await db.get(models.AppSetting, key)
+        if row is None:
+            db.add(models.AppSetting(key=key, value=value))
+        else:
+            row.value = value
+    await db.commit()
+    await audit(db, admin.username, "settings_updated", ", ".join(sorted(body.values)))
+    result = await db.execute(select(models.AppSetting).order_by(models.AppSetting.key))
+    return list(result.scalars())
+

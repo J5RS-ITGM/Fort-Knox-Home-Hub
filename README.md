@@ -85,6 +85,20 @@ docker-compose.yml   db + backend + frontend
 - WebSocket: snapshot → ping/pong → live state pushes
 - `next build` passes clean (Next 15.5, React 19, Tailwind 4)
 
+## Admin configuration
+
+Everything operational is configured at `/admin` (admin role):
+- **Users** — accounts, roles, disable, password resets
+- **Family** — household roster for Chore Quest/panels (no logins needed)
+- **Devices** — sensor placement table (room/floor/x/y), add/remove;
+  complements drag-to-place on the Security board
+- **Allowlist** — the DB-backed service allowlist; changes enforce
+  immediately and every change requires a note and is audited
+- **Settings** — non-secret app config (home name, lat/lon, timezone)
+- **Audit** — who did what, when
+
+Secrets (HA token, DB password, cookie policy) are environment-only.
+
 ## Auth & PWA
 
 - Session auth: bcrypt passwords, opaque tokens (SHA-256 at rest) in
@@ -106,9 +120,17 @@ coexists with other apps behind the host reverse proxy:
 
 ```bash
 git clone git@github.com:J5RS-ITGM/Fort-Knox-Home-Hub.git && cd Fort-Knox-Home-Hub
-cp .env.example .env    # set POSTGRES_PASSWORD; keep COOKIE_SECURE=true
+cp .env.example .env          # set POSTGRES_PASSWORD; keep COOKIE_SECURE=true
+cp seed.example.json seed.json && nano seed.json   # your admin, family, sensors
 docker compose up -d --build
+docker compose exec backend python -m app.seed /app/seed.json
 ```
+
+`seed.json` is gitignored and idempotent (safe to re-run). It intentionally
+cannot carry the HA token — set that in **Admin → HA Bridge**, where it's
+stored server-side, write-only, and applied with the Restart Bridge button.
+Runtime configuration (HA connection, household roster, placements) all
+lives in the admin panel after that; the seed is just the head start.
 
 Then merge `deploy/Caddyfile.example` into the box's Caddyfile alongside
 the other apps' site blocks and `caddy reload`. One origin (`/` -> app,
