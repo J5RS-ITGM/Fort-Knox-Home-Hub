@@ -70,8 +70,9 @@ confirm a disallowed service returns 403.
 - Work on branches, open PRs. Never push to `main` directly.
 - Small, reviewable commits. The owner reviews everything; write commit
   messages that explain *why*.
-- Windows dev syncs via `scripts/Sync-FromZip.ps1`; the Pi deploys via
-  `scripts/deploy.sh` (pull + compose up). Don't break either.
+- Windows dev syncs via `scripts/Sync-FromZip.ps1` and holds the only
+  read/write deploy key; servers (VPS/Pi) deploy via `scripts/deploy.sh`
+  (pull + compose up) with read-only keys behind Caddy. Don't break either.
 
 ## Roadmap context (so you pick the right next thing)
 

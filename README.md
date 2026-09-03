@@ -105,14 +105,21 @@ The stack binds to 127.0.0.1:8100 (API) and 127.0.0.1:3100 (app) so it
 coexists with other apps behind the host reverse proxy:
 
 ```bash
-git clone git@github.com:J5RS-ITGM/CommandCenter.git && cd CommandCenter
+git clone git@github.com:J5RS-ITGM/Fort-Knox-Home-Hub.git && cd Fort-Knox-Home-Hub
 cp .env.example .env    # set POSTGRES_PASSWORD; keep COOKIE_SECURE=true
 docker compose up -d --build
 ```
 
-Then install `deploy/nginx-homehub.conf.example` (or the Caddyfile block)
-for your domain — it routes `/` to the app and `/api` + `/ws` to the API on
-one origin, which is what makes the cookie auth work with zero CORS.
+Then merge `deploy/Caddyfile.example` into the box's Caddyfile alongside
+the other apps' site blocks and `caddy reload`. One origin (`/` -> app,
+`/api` + `/ws` -> API) is what makes the cookie auth work with zero CORS;
+Caddy handles TLS automatically.
+
+**Key policy:** the Windows dev machine holds the read/write deploy key
+(pushes); the VPS holds its own read-only deploy key (pulls only). GitHub
+scopes each deploy key to one repo and each key attaches to only one repo,
+so the two machines use two distinct keypairs, each generated on the
+machine that holds it.
 
 **Reaching HA from the VPS:** point `HA_URL` across a WireGuard or
 Tailscale tunnel to your home network. Never port-forward HA to the
