@@ -7,6 +7,7 @@ import {
   Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause,
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
+import AlarmControl from "@/components/AlarmControl";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 /* ------------------------------------------------------------------ *
@@ -416,13 +417,6 @@ export default function WallPanel() {
     if (d.kind === "monitor") return;
     try { await callService(d.kind, "toggle", d.entity_id); } catch (e) { console.error(e); }
   };
-  const toggleArm = async () => {
-    if (!alarm || busy) return;
-    setBusy(true);
-    try {
-      await callService("alarm_control_panel", armed ? "alarm_disarm" : "alarm_arm_away", alarm.entity_id);
-    } catch (e) { console.error(e); } finally { setBusy(false); }
-  };
   const toggleTask = i => setTasks(t=>t.map((x,j)=> j===i?[x[0],x[1],!x[2]]:x));
 
   // ---- grid geometry ----
@@ -620,9 +614,7 @@ export default function WallPanel() {
           <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
             <Settings2 size={17}/>{edit?"Done":"Edit"}
           </button>
-          <button onClick={toggleArm} disabled={!alarm || busy} style={{ display:"flex", alignItems:"center", gap:9, background: armed?C.open:C.secure, color:"#0c0e13", border:"none", borderRadius:12, padding:"11px 20px", fontSize:15, fontWeight:800, cursor: alarm?"pointer":"default", opacity: alarm?1:0.5 }}>
-            {armed ? <Lock size={19}/> : <Unlock size={19}/>}{armed?"Armed":"Disarm"}
-          </button>
+          <AlarmControl variant="compact" />
         </div>
       </div>
 

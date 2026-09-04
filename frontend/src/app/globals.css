@@ -42,3 +42,12 @@ html {
 .lamp-live {
   animation: lamp-pulse 2.4s ease-in-out infinite;
 }
+
+/* Security board arm/disarm feedback */
+@keyframes hh-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes hh-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

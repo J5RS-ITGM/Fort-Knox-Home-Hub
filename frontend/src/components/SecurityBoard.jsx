@@ -493,7 +493,22 @@ export default function SecurityBoard() {
   }, [sensors, entities]);
 
   const alarm = entities.get("alarm_control_panel.homehub");
+  const alarmState = alarm ? alarm.state : "unknown"; // disarmed|arming|armed_away|armed_home|pending|triggered
   const armed = alarm ? alarm.state.startsWith("armed") : false;
+
+  // Command feedback: when the user presses arm/disarm we record what we
+  // asked for; it clears once HA's echoed state matches (or after a timeout).
+  // This is what gives the button a visible acknowledgment.
+  const [command, setCommand] = useState(null); // "arm" | "disarm" | null
+  useEffect(() => {
+    if (!command) return;
+    const settled =
+      (command === "arm" && (alarmState.startsWith("armed") || alarmState === "arming" || alarmState === "pending")) ||
+      (command === "disarm" && alarmState === "disarmed");
+    if (settled) setCommand(null);
+    const t = setTimeout(() => setCommand(null), 8000); // failsafe: never stick
+    return () => clearTimeout(t);
+  }, [command, alarmState]);
 
   const liveStateRef = useRef(liveState);
   const armedRef = useRef(armed);
@@ -506,9 +521,13 @@ export default function SecurityBoard() {
 
   const setArm = async (wantArmed) => {
     if (!alarm) return;
+    setCommand(wantArmed ? "arm" : "disarm"); // instant visual ack
     try {
       await callService("alarm_control_panel", wantArmed ? "alarm_arm_away" : "alarm_disarm", alarm.entity_id);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setCommand(null); // failed: drop the pending state
+    }
   };
 
   // marker drag → update local always; persist only on drop (live === false).
@@ -627,11 +646,12 @@ export default function SecurityBoard() {
           </span>
         )}
         {saveNote && <span style={{fontSize:11, color:C.accent, whiteSpace:"nowrap"}}>{saveNote}</span>}
+        <AlarmStatus state={alarmState} command={command}/>
       </div>
       <div style={{display:"flex", gap:8}}>
         <Pill active={edit} onClick={()=>{ setEdit(e=>!e); setSelected(null); }} label={edit?"Done":"Edit"} tone={C.accent}/>
-        <Pill active={armed} onClick={()=>setArm(true)}  label="Armed" tone={C.open}/>
-        <Pill active={!armed} onClick={()=>setArm(false)} label="Disarmed" tone={C.secure}/>
+        <Pill active={armed} busy={command==="arm"} onClick={()=>setArm(true)}  label={command==="arm" ? "Arming…" : "Arm"} tone={C.open}/>
+        <Pill active={!armed && alarmState==="disarmed"} busy={command==="disarm"} onClick={()=>setArm(false)} label={command==="disarm" ? "Disarming…" : "Disarm"} tone={C.secure}/>
       </div>
     </div>
   );
@@ -705,14 +725,64 @@ export default function SecurityBoard() {
   );
 }
 
-function Pill({active,onClick,label,tone}) {
+function Pill({active,onClick,label,tone,busy}) {
+  const [pressed, setPressed] = useState(false);
   return (
-    <button onClick={onClick} style={{
-      background: active ? tone : "transparent", color: active ? "#0f1116" : C.sub,
-      border:`1px solid ${active?tone:C.floorEdge}`, borderRadius:20, padding:"7px 16px",
-      fontSize:12, fontWeight:700, cursor:"pointer", transition:"all .15s" }}>{label}</button>
+    <button
+      onClick={onClick}
+      onPointerDown={()=>setPressed(true)}
+      onPointerUp={()=>setPressed(false)}
+      onPointerLeave={()=>setPressed(false)}
+      disabled={busy}
+      style={{
+        display:"flex", alignItems:"center", gap:7,
+        background: busy ? tone : active ? tone : "transparent",
+        color: (active||busy) ? "#0f1116" : C.sub,
+        border:`1px solid ${(active||busy)?tone:C.floorEdge}`, borderRadius:20, padding:"7px 16px",
+        fontSize:12, fontWeight:700, cursor: busy ? "default" : "pointer",
+        transform: pressed ? "scale(0.94)" : "scale(1)",
+        opacity: busy ? 0.85 : 1,
+        transition:"transform .08s, background .15s, color .15s, border-color .15s",
+        boxShadow: pressed ? `0 0 0 3px ${tone}55` : "none",
+      }}>
+      {busy && (
+        <span style={{
+          width:11, height:11, border:`2px solid #0f1116`, borderTopColor:"transparent",
+          borderRadius:"50%", display:"inline-block", animation:"hh-spin .7s linear infinite",
+        }}/>
+      )}
+      {label}
+    </button>
   );
 }
+
+// live alarm-state badge: shows exactly what HA reports, color-coded
+function AlarmStatus({ state, command }) {
+  const map = {
+    disarmed:   [C.secure, "Disarmed"],
+    arming:     [C.motion, "Arming…"],
+    pending:    [C.motion, "Entry delay"],
+    armed_away: [C.open,   "Armed · Away"],
+    armed_home: [C.open,   "Armed · Home"],
+    triggered:  [C.open,   "⚠ TRIGGERED"],
+    unknown:    [C.sub,    "—"],
+  };
+  const [color, text] = map[state] || [C.sub, state];
+  const pulse = state === "triggered" || state === "pending" || state === "arming" || !!command;
+  return (
+    <span style={{
+      display:"inline-flex", alignItems:"center", gap:6, fontSize:11, fontWeight:700,
+      color, whiteSpace:"nowrap", padding:"3px 9px", borderRadius:20,
+      border:`1px solid ${color}55`, background:`${color}15`,
+    }}>
+      <span style={{ width:7, height:7, borderRadius:7, background:color,
+        boxShadow:`0 0 8px ${color}`,
+        animation: pulse ? "hh-blink 1s ease-in-out infinite" : "none" }}/>
+      {text}
+    </span>
+  );
+}
+
 function Stat({n,l,tone}) {
   return (
     <div style={{background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"12px 14px"}}>

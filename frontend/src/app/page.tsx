@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 import { callService, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
+import AlarmControl from "@/components/AlarmControl";
 import { logout, useMe } from "@/lib/auth";
 import AuthGate from "@/components/AuthGate";
 
@@ -81,48 +82,9 @@ function StatusRail({ linkUp, bridgeUp, alarm, isAdmin }: { linkUp: boolean; bri
           <span className="flex items-center gap-1.5"><Lamp on={linkUp} alert={!linkUp} /> App link</span>
           <span className="flex items-center gap-1.5"><Lamp on={bridgeUp} alert={!bridgeUp} /> HA bridge</span>
         </div>
-        {alarm && <AlarmChip alarm={alarm} />}
+        {alarm && <div className="ml-auto"><AlarmControl /></div>}
       </div>
     </header>
-  );
-}
-
-function AlarmChip({ alarm }: { alarm: Entity }) {
-  const [busy, setBusy] = useState(false);
-  const armed = alarm.state.startsWith("armed");
-  const label = alarm.state === "armed_away" ? "Armed · Away" : alarm.state === "armed_home" ? "Armed · Home" : "Disarmed";
-
-  const set = async (service: string) => {
-    setBusy(true);
-    try {
-      await callService("alarm_control_panel", service, alarm.entity_id);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="ml-auto flex items-center gap-2">
-      <span className={`rounded-full border px-3 py-1 text-xs font-medium ${armed ? "border-lamp text-lamp" : "border-line text-ink-muted"}`}>
-        {label}
-      </span>
-      <div className="flex overflow-hidden rounded-md border border-line text-xs">
-        {[
-          ["alarm_disarm", "Off"],
-          ["alarm_arm_home", "Home"],
-          ["alarm_arm_away", "Away"],
-        ].map(([service, text]) => (
-          <button
-            key={service}
-            disabled={busy}
-            onClick={() => set(service)}
-            className="px-2.5 py-1 text-ink-muted transition-colors hover:bg-panel-raised hover:text-ink focus-visible:outline focus-visible:outline-lamp disabled:opacity-50"
-          >
-            {text}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
