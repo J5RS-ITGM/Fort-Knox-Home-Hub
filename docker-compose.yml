@@ -34,8 +34,10 @@ services:
       # Same-origin behind the reverse proxy -> no CORS needed (empty).
       # For split-origin dev, set e.g. http://localhost:3000
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      PHOTOS_DIR: /data/photos
     volumes:
       - ./seed.json:/app/seed.json:ro
+      - photos:/data/photos
     depends_on:
       db:
         condition: service_healthy
@@ -54,3 +56,4 @@ services:
 
 volumes:
   pgdata:
+  photos:

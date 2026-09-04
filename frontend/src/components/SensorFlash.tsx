@@ -14,9 +14,25 @@ import { usePathname } from "next/navigation";
 import { Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 
+// Defaults; overridden by Admin -> Settings (alerts_mode, colors, timer).
 const AMBER = "#e8a33d";
 const RED = "#e0483d";
 const AMBER_MS = 10000;
+
+interface AlertConfig { mode: "all" | "armed_only" | "off"; colorDisarmed: string; colorArmed: string; dismissMs: number; }
+const DEFAULT_CFG: AlertConfig = { mode: "all", colorDisarmed: AMBER, colorArmed: RED, dismissMs: AMBER_MS };
+
+function parseCfg(v: Record<string, string>): AlertConfig {
+  const mode = v.alerts_mode === "off" || v.alerts_mode === "armed_only" ? v.alerts_mode : "all";
+  const hex = (x: string | undefined, fb: string) => (x && /^#[0-9a-fA-F]{6}$/.test(x) ? x : fb);
+  const secs = Number(v.alert_dismiss_secs);
+  return {
+    mode,
+    colorDisarmed: hex(v.alert_color_disarmed, AMBER),
+    colorArmed: hex(v.alert_color_armed, RED),
+    dismissMs: Number.isFinite(secs) && secs >= 0 ? secs * 1000 : AMBER_MS,
+  };
+}
 
 interface FlashEvent { id: number; name: string; verb: string; armed: boolean; }
 
@@ -42,6 +58,20 @@ export default function SensorFlash() {
   const pathname = usePathname();
   const { entities } = useHomeHub();
   const [event, setEvent] = useState<FlashEvent | null>(null);
+  const [cfg, setCfg] = useState<AlertConfig>(DEFAULT_CFG);
+  const cfgRef = useRef(cfg);
+  useEffect(() => { cfgRef.current = cfg; }, [cfg]);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      fetch(`/api/ui-settings`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : {}))
+        .then((v) => { if (alive) setCfg(parseCfg(v)); })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 60_000); // settings edits apply within a minute
+    return () => { alive = false; clearInterval(t); };
+  }, []);
 
   const prev = useRef<Map<string, string>>(new Map());
   const seeded = useRef(false);
@@ -73,17 +103,20 @@ export default function SensorFlash() {
       latest = { id: ++counter.current, name: e.friendly_name || e.entity_id, verb, armed: armedRef.current };
     }
     if (!latest) return;
+    const c = cfgRef.current;
+    if (c.mode === "off") return;
+    if (c.mode === "armed_only" && !latest.armed) return;
     const cur = eventRef.current;
     if (cur && cur.armed && !latest.armed) return; // don't bury an unacked armed alert
     setEvent(latest);
     if (amberTimer.current) { clearTimeout(amberTimer.current); amberTimer.current = null; }
-    if (!latest.armed) amberTimer.current = setTimeout(() => setEvent(null), AMBER_MS);
+    if (!latest.armed && c.dismissMs > 0) amberTimer.current = setTimeout(() => setEvent(null), c.dismissMs);
   }, [entities]);
 
   if (!event) return null;
   if (pathname === "/login" || pathname === "/setup") return null;
 
-  const color = event.armed ? RED : AMBER;
+  const color = event.armed ? cfg.colorArmed : cfg.colorDisarmed;
   const dismiss = () => {
     if (amberTimer.current) { clearTimeout(amberTimer.current); amberTimer.current = null; }
     setEvent(null);

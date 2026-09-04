@@ -99,6 +99,19 @@ async def call_service(
     return {"ok": True}
 
 
+# -- ui settings (any signed-in user) ----------------------------------------
+# Non-secret, display-affecting settings for all clients (the admin-only
+# settings endpoint is for editing; this one is read-only for the UI).
+@protected.get("/ui-settings")
+async def ui_settings(session: AsyncSession = Depends(get_session)) -> dict:
+    from .auth_routes import SETTING_KEYS
+
+    result = await session.execute(
+        select(models.AppSetting).where(models.AppSetting.key.in_(SETTING_KEYS))
+    )
+    return {row.key: row.value for row in result.scalars()}
+
+
 # -- sensor export -----------------------------------------------------------
 # Spreadsheet registry of every entity the bridge sees, joined with saved
 # placements. Two sheets: "Sensors" (the security/environment devices, with

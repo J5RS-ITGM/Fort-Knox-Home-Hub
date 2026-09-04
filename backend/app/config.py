@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # run `alembic upgrade head` instead.
     db_auto_create: bool = True
 
+    # --- Gallery photo storage ----------------------------------------------
+    # Dev default: local folder. Compose mounts a named volume here.
+    photos_dir: str = "./photos"
+
     # --- Home Assistant bridge ---------------------------------------------
     # When ha_mock is true the backend runs a simulated house (entities that
     # mirror the real device plan) so the frontend can be built and demoed

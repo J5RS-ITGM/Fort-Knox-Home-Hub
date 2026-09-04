@@ -145,3 +145,57 @@ class ServiceAllow(Base):
     service: Mapped[str] = mapped_column(String(64), nullable=False)
     note: Mapped[str] = mapped_column(String(200), nullable=False, default="")
 
+
+
+# -- family modules (Chores / Calendar / Gallery) ------------------------------
+class Chore(Base):
+    """A recurring chore assigned to one family member. v1 model: every
+    chore is available daily; completion is tracked per calendar date."""
+
+    __tablename__ = "chores"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    emoji: Mapped[str] = mapped_column(String(16), nullable=False, default="⭐")
+    points: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    member_id: Mapped[str] = mapped_column(ForeignKey("family_members.id", ondelete="CASCADE"), nullable=False)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChoreCompletion(Base):
+    __tablename__ = "chore_completions"
+    __table_args__ = (UniqueConstraint("chore_id", "date", name="uq_chore_date"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    chore_id: Mapped[str] = mapped_column(ForeignKey("chores.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD (home-local)
+    done_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CalendarEvent(Base):
+    """Family calendar — app-owned data (HA is not involved)."""
+
+    __tablename__ = "calendar_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    time: Mapped[str | None] = mapped_column(String(5), nullable=True)          # HH:MM or null = all-day
+    member_id: Mapped[str | None] = mapped_column(ForeignKey("family_members.id", ondelete="SET NULL"), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Photo(Base):
+    """Gallery photo. The file lives on disk under settings.photos_dir
+    (a Docker volume in prod); this row is the index."""
+
+    __tablename__ = "photos"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    filename: Mapped[str] = mapped_column(String(200), nullable=False)  # stored name: {id}.{ext}
+    original: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False, default="image/jpeg")
+    uploaded_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

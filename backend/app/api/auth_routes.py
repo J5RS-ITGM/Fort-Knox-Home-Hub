@@ -360,7 +360,12 @@ async def remove_allow(
 
 
 # -- admin: app settings (non-secret) ----------------------------------------
-SETTING_KEYS = {"home_name", "latitude", "longitude", "timezone"}
+SETTING_KEYS = {
+    "home_name", "latitude", "longitude", "timezone",
+    # sensor alert cards (SensorFlash): "all" | "armed_only" | "off",
+    # hex colors, and the disarmed auto-dismiss window (seconds, 0 = sticky)
+    "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs",
+}
 
 
 @admin_router.get("/settings", response_model=list[SettingOut])

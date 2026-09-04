@@ -400,11 +400,40 @@ function SettingsTab({ settings, busy, act }: { settings: Record<string, string>
             <input className={input} placeholder={ph} value={form[key] ?? ""} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
           </label>
         ))}
+
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Sensor alert cards</h3>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-ink-muted">Show alerts</span>
+          <select className={input} value={form.alerts_mode ?? "all"} onChange={(e) => setForm({ ...form, alerts_mode: e.target.value })}>
+            <option value="all">Always (amber when disarmed, alarm color when armed)</option>
+            <option value="armed_only">Only while armed</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <div className="flex gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-ink-muted">Disarmed color</span>
+            <input type="color" className="h-9 w-16 cursor-pointer rounded border border-line bg-panel"
+              value={form.alert_color_disarmed || "#e8a33d"} onChange={(e) => setForm({ ...form, alert_color_disarmed: e.target.value })} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-ink-muted">Armed color</span>
+            <input type="color" className="h-9 w-16 cursor-pointer rounded border border-line bg-panel"
+              value={form.alert_color_armed || "#e0483d"} onChange={(e) => setForm({ ...form, alert_color_armed: e.target.value })} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-ink-muted">Auto-dismiss (s, 0 = stay)</span>
+            <input type="number" min={0} max={600} className={`${input} w-28`}
+              value={form.alert_dismiss_secs ?? "10"} onChange={(e) => setForm({ ...form, alert_dismiss_secs: e.target.value })} />
+          </label>
+        </div>
+        <p className="text-[11px] text-ink-muted">Armed alerts always stay until acknowledged. Changes reach open panels within a minute.</p>
         <button disabled={busy} className={`${primary} mt-1 self-start`}
           onClick={() => {
-            // send ONLY this form's fields — never echo back whatever the
+            // send ONLY known editable fields — never echo back whatever the
             // GET returned (defense in depth against key leakage)
-            const values = Object.fromEntries(fields.map(([key]) => [key, form[key] ?? ""]));
+            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs"];
+            const values = Object.fromEntries(keys.map((key) => [key, form[key] ?? ""]));
             act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values }) }));
           }}>
           Save settings

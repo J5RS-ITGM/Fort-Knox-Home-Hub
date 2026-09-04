@@ -82,6 +82,15 @@ function StatusRail({ linkUp, bridgeUp, alarm, isAdmin }: { linkUp: boolean; bri
           Home<span className="text-lamp">Hub</span>
         </h1>
         <nav className="flex items-center gap-2">
+          <a href="/chores" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
+            Chores
+          </a>
+          <a href="/calendar" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
+            Calendar
+          </a>
+          <a href="/gallery" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
+            Gallery
+          </a>
           <a href="/panel" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
             Wall panel
           </a>

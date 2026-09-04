@@ -169,14 +169,41 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView }) 
 // field, centered on the home coordinates from Admin -> Settings, with
 // range rings instead of a third-party basemap (keeps egress to the one
 // approved service, proxied server-side so panels stay local-only).
-const RADAR_Z = 7; // ~city-to-regional scale
+// Local geographic context (frontend/public/geo/us-overlay.json — bundled
+// public-domain Natural Earth / Census outlines): state lines, Great Lakes
+// filled, major-city markers. Drawn locally so the radar needs NO basemap
+// service — panels stay on approved-egress-only.
+const CITIES = [
+  ["Chicago",41.878,-87.630],["Milwaukee",43.039,-87.906],["Rockford",42.271,-89.094],
+  ["Madison",43.073,-89.401],["Green Bay",44.513,-88.013],["Grand Rapids",42.963,-85.668],
+  ["South Bend",41.676,-86.252],["Fort Wayne",41.079,-85.139],["Indianapolis",39.768,-86.158],
+  ["Champaign",40.116,-88.243],["Springfield IL",39.782,-89.651],["Peoria",40.694,-89.589],
+  ["Davenport",41.524,-90.578],["Cedar Rapids",41.978,-91.665],["Des Moines",41.587,-93.625],
+  ["St. Louis",38.627,-90.199],["Kansas City",39.100,-94.578],["Minneapolis",44.978,-93.265],
+  ["Detroit",42.331,-83.046],["Toledo",41.654,-83.536],["Cleveland",41.499,-81.694],
+  ["Columbus",39.961,-82.999],["Cincinnati",39.103,-84.512],["Louisville",38.253,-85.758],
+  ["Nashville",36.163,-86.781],["Memphis",35.150,-90.049],["Omaha",41.257,-95.995],
+  ["Denver",39.739,-104.990],["Dallas",32.777,-96.797],["Houston",29.760,-95.370],
+  ["Atlanta",33.749,-84.388],["Charlotte",35.227,-80.843],["Washington DC",38.907,-77.037],
+  ["Philadelphia",39.953,-75.165],["New York",40.713,-74.006],["Boston",42.360,-71.059],
+  ["Pittsburgh",40.441,-79.996],["Buffalo",42.887,-78.878],["Phoenix",33.448,-112.074],
+  ["Seattle",47.606,-122.332],["Portland",45.515,-122.679],["San Francisco",37.775,-122.419],
+  ["Los Angeles",34.052,-118.244],["San Diego",32.716,-117.161],["Miami",25.762,-80.192],
+  ["Tampa",27.951,-82.457],["New Orleans",29.951,-90.072],["Salt Lake City",40.761,-111.891],
+];
 function LiveRadar({ onClose }) {
   const canvasRef = useRef();
   const [meta, setMeta] = useState(null);   // {frames, lat, lon} | {error}
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(true);
+  const [zoom, setZoom] = useState(7);      // slippy zoom, 5 (region) .. 9 (metro)
   const [tick, setTick] = useState(0);      // bumped when tiles finish loading
   const imgCache = useRef(new Map());       // "path/z/x/y" -> HTMLImageElement
+  const geoRef = useRef(null);              // bundled states/lakes overlay
+  useEffect(() => {
+    fetch("/geo/us-overlay.json").then((r) => r.ok ? r.json() : null)
+      .then((g) => { geoRef.current = g; setTick((t) => t + 1); }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -212,13 +239,53 @@ function LiveRadar({ onClose }) {
       return centerMsg("Set Latitude/Longitude in Admin → Settings to enable radar");
     const frame = meta.frames[idx]; if (!frame) return;
 
-    // slippy-map math at fixed zoom, home at canvas center
-    const n = 2 ** RADAR_Z;
+    // slippy-map math, home at canvas center
+    const n = 2 ** zoom;
     const xt = ((meta.lon + 180) / 360) * n;
     const latR = (meta.lat * Math.PI) / 180;
     const yt = ((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2) * n;
     const TILE = 256;
     const originX = W / 2 - xt * TILE, originY = H / 2 - yt * TILE;
+    const toPx = (lat, lon) => {
+      const fx = ((lon + 180) / 360) * n;
+      const lr = (lat * Math.PI) / 180;
+      const fy = ((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2) * n;
+      return [originX + fx * TILE, originY + fy * TILE];
+    };
+
+    // ---- geography UNDER the radar: lakes filled, state lines, cities ----
+    const geo = geoRef.current;
+    if (geo) {
+      const drawRings = (rings, close) => {
+        rings.forEach((ring) => {
+          ctx.beginPath();
+          let started = false;
+          for (const [lon, lat] of ring) {
+            const [px2, py2] = toPx(lat, lon);
+            if (px2 < -200 || px2 > W + 200 || py2 < -200 || py2 > H + 200) {
+              if (!started) continue;
+            }
+            if (!started) { ctx.moveTo(px2, py2); started = true; }
+            else ctx.lineTo(px2, py2);
+          }
+          if (started && close) ctx.closePath();
+          if (started) close ? (ctx.fill(), ctx.stroke()) : ctx.stroke();
+        });
+      };
+      ctx.fillStyle = "#16233c"; ctx.strokeStyle = "#2c3f63"; ctx.lineWidth = 1;
+      drawRings(geo.lakes, true);
+      ctx.strokeStyle = "rgba(120,136,175,0.55)"; ctx.lineWidth = 1.2;
+      drawRings(geo.states, false);
+    }
+    ctx.font = "600 11px system-ui"; ctx.textAlign = "left";
+    CITIES.forEach(([name, clat, clon]) => {
+      const [px2, py2] = toPx(clat, clon);
+      if (px2 < 8 || px2 > W - 8 || py2 < 8 || py2 > H - 8) return;
+      ctx.fillStyle = "rgba(200,210,228,0.9)";
+      ctx.beginPath(); ctx.arc(px2, py2, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(200,210,228,0.75)";
+      ctx.fillText(name, px2 + 6, py2 + 4);
+    });
 
     const x0 = Math.floor(xt - W / 2 / TILE), x1 = Math.floor(xt + W / 2 / TILE);
     const y0 = Math.floor(yt - H / 2 / TILE), y1 = Math.floor(yt + H / 2 / TILE);
@@ -226,16 +293,16 @@ function LiveRadar({ onClose }) {
     for (let tx = x0; tx <= x1; tx++) for (let ty = y0; ty <= y1; ty++) {
       if (ty < 0 || ty >= n) continue;
       const wx = ((tx % n) + n) % n;
-      const key = `${frame.path}/${RADAR_Z}/${wx}/${ty}`;
+      const key = `${frame.path}/${zoom}/${wx}/${ty}`;
       let img = imgCache.current.get(key);
       if (!img) {
         img = new Image();
-        img.src = `${API_URL}/api/radar/tile/${RADAR_Z}/${wx}/${ty}?path=${encodeURIComponent(frame.path)}`;
+        img.src = `${API_URL}/api/radar/tile/${zoom}/${wx}/${ty}?path=${encodeURIComponent(frame.path)}`;
         imgCache.current.set(key, img);
         if (imgCache.current.size > 600) imgCache.current.delete(imgCache.current.keys().next().value);
       }
       if (img.complete && img.naturalWidth) {
-        ctx.globalAlpha = 0.9;
+        ctx.globalAlpha = 0.78; // geography reads through
         ctx.drawImage(img, originX + tx * TILE, originY + ty * TILE, TILE, TILE);
         ctx.globalAlpha = 1;
       } else { pending++; img.onload = () => setTick((t) => t + 1); }
@@ -261,7 +328,7 @@ function LiveRadar({ onClose }) {
     ctx.font = "700 13px system-ui"; ctx.textAlign = "left";
     ctx.fillText(label, 14, H - 14);
     if (pending) { ctx.fillStyle = C.sub; ctx.font = "600 11px system-ui"; ctx.fillText("loading tiles…", 14, 20); }
-  }, [meta, idx, tick]);
+  }, [meta, idx, tick, zoom]);
 
   const frames = meta?.frames ?? [];
   return (
@@ -271,6 +338,8 @@ function LiveRadar({ onClose }) {
         <span style={{fontSize:20, fontWeight:800, color:C.text}}>Weather Radar</span>
         <span style={{fontSize:12, color:C.sub}}>RainViewer · updates every 5 min</span>
         <div style={{flex:1}}/>
+        <button onClick={()=>setZoom(z=>Math.max(5,z-1))} style={{ background:"transparent", color:C.text, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 13px", fontSize:15, fontWeight:800, cursor:"pointer" }}>−</button>
+        <button onClick={()=>setZoom(z=>Math.min(9,z+1))} style={{ background:"transparent", color:C.text, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 13px", fontSize:15, fontWeight:800, cursor:"pointer" }}>+</button>
         <button onClick={()=>setPlaying(p=>!p)} style={{ display:"flex", alignItems:"center", gap:6, background:"transparent", color:C.text, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
           {playing ? <Pause size={15}/> : <Play size={15}/>}{playing ? "Pause" : "Play"}
         </button>
@@ -293,19 +362,40 @@ const EVENTS = [ ["7:30a","School drop-off"], ["1:00p","Dentist — Maya"], ["6:
 const TASKS0 = [ ["Replace garage sensor battery","Eric",false], ["Order pool chlorine","Eric",false], ["Permission slip","Sam",true], ["Recycling","Kids",false] ];
 const FORECAST = [ ["Now","72°",Sun], ["1p","75°",Sun], ["2p","76°",Sun], ["3p","74°",Cloud], ["4p","71°",Cloud], ["5p","68°",Droplets] ];
 
+// ================= CLOCK =====================
+function ClockStrip() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const time = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const secs = now.toLocaleTimeString([], { second: "2-digit" }).padStart(2, "0");
+  const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  return (
+    <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", gap:16, padding:"0 18px",
+                  background:C.card, border:`1px solid ${C.edge}`, borderRadius:12 }}>
+      <span style={{ fontSize:34, fontWeight:800, color:C.text, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{time}</span>
+      <span style={{ fontSize:15, fontWeight:700, color:C.subDim, fontVariantNumeric:"tabular-nums" }}>:{secs}</span>
+      <span style={{ fontSize:16, fontWeight:600, color:C.sub }}>{date}</span>
+    </div>
+  );
+}
+
 // ================= LAYOUT =====================
 const GRID_COLS = 12;
 const DEFAULT_LAYOUT = {
-  board:   { x:0, y:0, w:6, h:4, visible:true },
-  weather: { x:6, y:0, w:3, h:2, visible:true },
-  radar:   { x:9, y:0, w:3, h:2, visible:true },
-  climate: { x:6, y:2, w:3, h:2, visible:true },
-  calendar:{ x:9, y:2, w:3, h:2, visible:true },
-  devices: { x:0, y:4, w:6, h:2, visible:true },
-  tasks:   { x:6, y:4, w:6, h:2, visible:true },
+  clock:   { x:0, y:0, w:12, h:1, visible:true },
+  board:   { x:0, y:1, w:6, h:4, visible:true },
+  weather: { x:6, y:1, w:3, h:2, visible:true },
+  radar:   { x:9, y:1, w:3, h:2, visible:true },
+  climate: { x:6, y:3, w:3, h:2, visible:true },
+  calendar:{ x:9, y:3, w:3, h:2, visible:true },
+  devices: { x:0, y:5, w:6, h:2, visible:true },
+  tasks:   { x:6, y:5, w:6, h:2, visible:true },
 };
 const TILE_META = {
-  board:{label:"Home Map"}, weather:{label:"Weather"}, radar:{label:"Radar"},
+  clock:{label:"Clock"}, board:{label:"Home Map"}, weather:{label:"Weather"}, radar:{label:"Radar"},
   climate:{label:"Climate"}, calendar:{label:"Today"}, devices:{label:"Devices"}, tasks:{label:"Tasks"},
 };
 const LS_KEY = "homehub.wallpanel.layout.v2";
@@ -402,9 +492,12 @@ export default function WallPanel() {
   const [edit, setEdit] = useState(false);
 
   // ---- layout: server-backed with localStorage fallback --------------------
+  // Saved layouts predate newly shipped tiles (e.g. clock): merge defaults
+  // underneath so new tiles appear without wiping user arrangements.
+  const withNewTiles = (saved) => ({ ...DEFAULT_LAYOUT, ...saved });
   const [layout, setLayout] = useState(() => {
     if (typeof window !== "undefined") {
-      try { const s = localStorage.getItem(LS_KEY); if (s) return JSON.parse(s); } catch {}
+      try { const s = localStorage.getItem(LS_KEY); if (s) return withNewTiles(JSON.parse(s)); } catch {}
     }
     return DEFAULT_LAYOUT;
   });
@@ -415,7 +508,7 @@ export default function WallPanel() {
       .then(d => {
         if (d?.layout_json) {
           const parsed = JSON.parse(d.layout_json);
-          if (parsed && parsed.board) setLayout(parsed);
+          if (parsed && parsed.board) setLayout(withNewTiles(parsed));
         }
       })
       .catch(() => {})
@@ -525,6 +618,11 @@ export default function WallPanel() {
 
   // ---- tile content ----
   const tileContent = {
+    clock: (
+      <Tile title="Clock" edit={edit} onToggleVisible={()=>setVisible("clock",false)} style={{padding:0}}>
+        <ClockStrip/>
+      </Tile>
+    ),
     board: (
       <Tile title="Home Map" edit={edit} onToggleVisible={()=>setVisible("board",false)} style={{padding:0}}>
         <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView}/></div>
