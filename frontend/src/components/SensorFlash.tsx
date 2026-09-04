@@ -19,18 +19,27 @@ const AMBER = "#e8a33d";
 const RED = "#e0483d";
 const AMBER_MS = 10000;
 
-interface AlertConfig { mode: "all" | "armed_only" | "off"; colorDisarmed: string; colorArmed: string; dismissMs: number; }
-const DEFAULT_CFG: AlertConfig = { mode: "all", colorDisarmed: AMBER, colorArmed: RED, dismissMs: AMBER_MS };
+type AlertMode = "all" | "armed_only" | "off";
+interface AlertConfig { mode: AlertMode; colorDisarmed: string; colorArmed: string; dismissMs: number; rules: Record<string, AlertMode>; }
+const DEFAULT_CFG: AlertConfig = { mode: "all", colorDisarmed: AMBER, colorArmed: RED, dismissMs: AMBER_MS, rules: {} };
 
 function parseCfg(v: Record<string, string>): AlertConfig {
   const mode = v.alerts_mode === "off" || v.alerts_mode === "armed_only" ? v.alerts_mode : "all";
   const hex = (x: string | undefined, fb: string) => (x && /^#[0-9a-fA-F]{6}$/.test(x) ? x : fb);
   const secs = Number(v.alert_dismiss_secs);
+  let rules: Record<string, AlertMode> = {};
+  try {
+    const parsed = JSON.parse(v.alert_rules || "{}");
+    for (const [k, r] of Object.entries(parsed)) {
+      if (r === "all" || r === "armed_only" || r === "off") rules[k] = r;
+    }
+  } catch { rules = {}; }
   return {
     mode,
     colorDisarmed: hex(v.alert_color_disarmed, AMBER),
     colorArmed: hex(v.alert_color_armed, RED),
     dismissMs: Number.isFinite(secs) && secs >= 0 ? secs * 1000 : AMBER_MS,
+    rules,
   };
 }
 
@@ -100,12 +109,15 @@ export default function SensorFlash() {
       if (before === e.state) continue;
       const verb = activeVerb(e);
       if (!verb) continue;
+      // Effective mode for THIS sensor: its rule, else the global default.
+      const c0 = cfgRef.current;
+      const eff = c0.rules[e.entity_id] ?? c0.mode;
+      if (eff === "off") continue;
+      if (eff === "armed_only" && !armedRef.current) continue;
       latest = { id: ++counter.current, name: e.friendly_name || e.entity_id, verb, armed: armedRef.current };
     }
     if (!latest) return;
     const c = cfgRef.current;
-    if (c.mode === "off") return;
-    if (c.mode === "armed_only" && !latest.armed) return;
     const cur = eventRef.current;
     if (cur && cur.armed && !latest.armed) return; // don't bury an unacked armed alert
     setEvent(latest);

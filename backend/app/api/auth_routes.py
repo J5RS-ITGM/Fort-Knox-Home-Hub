@@ -365,6 +365,9 @@ SETTING_KEYS = {
     # sensor alert cards (SensorFlash): "all" | "armed_only" | "off",
     # hex colors, and the disarmed auto-dismiss window (seconds, 0 = sticky)
     "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs",
+    # per-sensor overrides: JSON {entity_id: "all"|"armed_only"|"off"};
+    # entities absent from the map follow alerts_mode
+    "alert_rules",
 }
 
 

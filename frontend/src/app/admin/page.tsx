@@ -84,7 +84,7 @@ function AdminInner() {
       {tab === "Devices" && <DevicesTab {...{ placements, entities, busy, act }} />}
       {tab === "Allowlist" && <AllowlistTab {...{ rules, busy, act }} />}
       {tab === "HA Bridge" && <HABridgeTab {...{ busy, act }} />}
-      {tab === "Settings" && <SettingsTab {...{ settings, busy, act }} />}
+      {tab === "Settings" && <SettingsTab {...{ settings, entities, busy, act }} />}
       {tab === "Audit" && <AuditTab audit={audit} />}
     </main>
   );
@@ -381,7 +381,22 @@ function HABridgeTab({ busy, act }: { busy: boolean; act: (f: () => Promise<Resp
 }
 
 // ---------------------------------------------------------------- Settings
-function SettingsTab({ settings, busy, act }: { settings: Record<string, string>; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+function SettingsTab({ settings, entities, busy, act }: { settings: Record<string, string>; entities: Entity[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
+  // Sensors that can raise an alert card: binary_sensors + locks (matches
+  // SensorFlash.activeVerb). Includes Z-Wave diagnostics with no device
+  // class so their AC-mains/tamper chatter can be silenced per-sensor.
+  const alertable = entities
+    .filter((e) => e.domain === "binary_sensor" || e.domain === "lock")
+    .sort((a, b) => (a.friendly_name || a.entity_id).localeCompare(b.friendly_name || b.entity_id));
+  type Rule = "all" | "armed_only" | "off";
+  const parseRules = (raw: string | undefined): Record<string, Rule> => {
+    try {
+      const p0 = JSON.parse(raw || "{}");
+      const out: Record<string, Rule> = {};
+      for (const [k, v] of Object.entries(p0)) if (v === "all" || v === "armed_only" || v === "off") out[k] = v;
+      return out;
+    } catch { return {}; }
+  };
   const [form, setForm] = useState(settings);
   useEffect(() => setForm(settings), [settings]);
   const fields: [string, string, string][] = [
@@ -428,11 +443,54 @@ function SettingsTab({ settings, busy, act }: { settings: Record<string, string>
           </label>
         </div>
         <p className="text-[11px] text-ink-muted">Armed alerts always stay until acknowledged. Changes reach open panels within a minute.</p>
+
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Per-sensor alert rules</h3>
+        <p className="-mt-1 text-[11px] text-ink-muted">
+          Override the global setting per sensor — e.g. set daytime-noisy motion sensors to &quot;Only while armed&quot;.
+        </p>
+        <div className="max-h-80 overflow-y-auto rounded-lg border border-line">
+          <table className="w-full text-sm">
+            <tbody>
+              {alertable.length === 0 && (
+                <tr><td className="px-3 py-3 text-xs text-ink-muted">No sensors visible — bridge offline?</td></tr>
+              )}
+              {alertable.map((e) => {
+                const rules = parseRules(form.alert_rules);
+                const cur = rules[e.entity_id] ?? "default";
+                return (
+                  <tr key={e.entity_id} className="border-b border-line/60 last:border-0">
+                    <td className="px-3 py-2">
+                      <div className="text-sm">{e.friendly_name || e.entity_id}</div>
+                      <div className="font-[family-name:var(--font-mono)] text-[10px] text-ink-muted">{e.entity_id}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <select
+                        className={`${input} py-1 text-xs`}
+                        value={cur}
+                        onChange={(ev) => {
+                          const next = parseRules(form.alert_rules);
+                          if (ev.target.value === "default") delete next[e.entity_id];
+                          else next[e.entity_id] = ev.target.value as Rule;
+                          setForm({ ...form, alert_rules: JSON.stringify(next) });
+                        }}
+                      >
+                        <option value="default">Default</option>
+                        <option value="all">Always</option>
+                        <option value="armed_only">Only while armed</option>
+                        <option value="off">Never</option>
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
         <button disabled={busy} className={`${primary} mt-1 self-start`}
           onClick={() => {
             // send ONLY known editable fields — never echo back whatever the
             // GET returned (defense in depth against key leakage)
-            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs"];
+            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules"];
             const values = Object.fromEntries(keys.map((key) => [key, form[key] ?? ""]));
             act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values }) }));
           }}>
