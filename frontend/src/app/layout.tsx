@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import SWRegister from "@/components/SWRegister";
+import SensorFlash from "@/components/SensorFlash";
 
 export const metadata: Metadata = {
   title: "HomeHub",
@@ -20,6 +21,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="bg-field text-ink antialiased">
         <SWRegister />
+        <SensorFlash />
         {children}
       </body>
     </html>
