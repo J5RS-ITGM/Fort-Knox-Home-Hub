@@ -4,6 +4,7 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from "react"
 import * as THREE from "three";
 import { API_URL, callService } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
+import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import {
   PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
   planFromGrid, gridFromPlan, gridRect,
@@ -962,7 +963,7 @@ export default function SecurityBoard() {
   const shell = {
     fontFamily:"'DM Sans', system-ui, sans-serif",
     background:`radial-gradient(1200px 800px at 70% -10%, ${C.bg1}, ${C.bg0})`,
-    color:C.text, height:"100dvh", display:"flex", flexDirection:"column", overflow:"hidden",
+    color:C.text, height:`calc(100dvh - ${BOTTOM_TABS_HEIGHT}px - env(safe-area-inset-bottom))`, display:"flex", flexDirection:"column", overflow:"hidden",
   };
 
   const loading = placements === null;

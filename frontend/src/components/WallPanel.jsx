@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
 import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState } from "@/lib/planScene";
+import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import AlarmControl from "@/components/AlarmControl";
 import { useHomeHub } from "@/lib/useHomeHub";
 
@@ -734,7 +735,8 @@ export default function WallPanel() {
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif", height:"100dvh", width:"100vw", overflow:"hidden",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       display:"flex", flexDirection:"column",
-      paddingTop:"max(12px, env(safe-area-inset-top))", paddingBottom:"max(12px, env(safe-area-inset-bottom))",
+      paddingTop:"max(12px, env(safe-area-inset-top))",
+      paddingBottom:`calc(${BOTTOM_TABS_HEIGHT}px + max(12px, env(safe-area-inset-bottom)))`,
       paddingLeft:"max(12px, env(safe-area-inset-left))", paddingRight:"max(12px, env(safe-area-inset-right))",
       boxSizing:"border-box" }}>
 
@@ -803,6 +805,7 @@ export default function WallPanel() {
       </div>
 
       {showRadar && <LiveRadar onClose={()=>setShowRadar(false)}/>}
+      <BottomTabs/>
     </div>
   );
 }
