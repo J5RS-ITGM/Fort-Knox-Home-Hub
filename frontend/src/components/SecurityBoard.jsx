@@ -4,6 +4,11 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from "react"
 import * as THREE from "three";
 import { API_URL, callService } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
+import {
+  PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
+  planFromGrid, gridFromPlan, gridRect,
+  buildPlanFloor, makeTextSprite, defaultLabels, fetchBoardState,
+} from "@/lib/planScene";
 
 /* ------------------------------------------------------------------ *
  * Security Board — isometric 2.5D, live.
@@ -30,24 +35,6 @@ const FLOOR_H = 2.2;
 
 const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO" };
 
-// Floor-plan assets (both generated from the same Sweet Home 3D OBJ by
-// backend/tools/obj2svg.py and obj2plan.py — identical projection).
-const PLAN_URL = "/floorplans/first_floor.svg";
-const PLAN_JSON_URL = "/floorplans/first_floor.plan.json";
-// The plan's viewBox (from the converters): 0..1000 x 0..885.5
-const PLAN_W = 1000, PLAN_H = 885.5;
-// Isometric grid space is x -4..4, z -3.75..3.75; these map between the two.
-function planFromGrid(x, y) {
-  return { px: ((x + 4) / 8) * PLAN_W, py: ((y + 3.75) / 7.5) * PLAN_H };
-}
-function gridFromPlan(px, py) {
-  return { x: (px / PLAN_W) * 8 - 4, y: (py / PLAN_H) * 7.5 - 3.75 };
-}
-// A plan-space rectangle {x,y,w,h} as grid-space center + size.
-function gridRect(r) {
-  const a = gridFromPlan(r.x, r.y), b = gridFromPlan(r.x + r.w, r.y + r.h);
-  return { cx: (a.x + b.x) / 2, cz: (a.y + b.y) / 2, w: b.x - a.x, d: b.y - a.y };
-}
 
 // rooms: [centerX, centerZ, width, depth, label] per floor (static demo plan)
 const ROOMS = {
@@ -173,22 +160,7 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
     const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(8,14,6); scene.add(key);
     const fill = new THREE.DirectionalLight(0x6b7ce0, 0.25); fill.position.set(-6,8,-4); scene.add(fill);
 
-    function makeLabel(text, ghost = false) {
-      const cv = document.createElement("canvas");
-      const dpr = 2; cv.width = 320*dpr; cv.height = 80*dpr;
-      const ctx = cv.getContext("2d");
-      ctx.scale(dpr,dpr);
-      ctx.font = `${ghost ? "500 italic" : "600"} 26px 'DM Sans', system-ui, sans-serif`;
-      ctx.fillStyle = ghost ? "rgba(126,140,156,0.85)" : "rgba(232,235,242,0.95)";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.shadowColor = "rgba(0,0,0,0.7)"; ctx.shadowBlur = 6;
-      ctx.fillText(text, 160, 40);
-      const tex = new THREE.CanvasTexture(cv);
-      tex.minFilter = THREE.LinearFilter;
-      const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false }));
-      spr.scale.set(2.75, 0.69, 1);
-      return spr;
-    }
+    const makeLabel = (text, ghost = false) => makeTextSprite(text, { ghost });
 
     function buildFloor(y, floorIdx) {
       const g = new THREE.Group();
@@ -215,54 +187,7 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
       return g;
     }
 
-    // Real geometry from the Sweet Home 3D pipeline (plan JSON, viewBox
-    // space -> grid space via gridRect). Walls render as waist-high stubs
-    // (real footprint, capped height) so markers stay visible from the
-    // isometric camera; real heights are in the JSON if a full-height
-    // mode is ever wanted.
-    const WALL_STUB_H = 0.55;
-    function buildFloorFromPlan(y, p) {
-      const g = new THREE.Group();
-      const ext = gridRect({ x: 0, y: 0, w: p.viewbox[0], h: p.viewbox[1] });
-
-      const slab = new THREE.Mesh(
-        new THREE.PlaneGeometry(ext.w, ext.d),
-        new THREE.MeshStandardMaterial({ color:hx(C.floor), roughness:0.95 })
-      );
-      slab.rotation.x = -Math.PI/2; slab.position.set(ext.cx, y, ext.cz); g.add(slab);
-
-      const roomMat = new THREE.MeshStandardMaterial({ color:hx("#242a38"), roughness:0.95 });
-      p.rooms.forEach((r) => {
-        const rr = gridRect(r);
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(rr.w, rr.d), roomMat);
-        floor.rotation.x = -Math.PI/2;
-        floor.position.set(rr.cx, y + 0.002, rr.cz);
-        g.add(floor);
-        const edge = new THREE.LineSegments(
-          new THREE.EdgesGeometry(new THREE.PlaneGeometry(rr.w, rr.d)),
-          new THREE.LineBasicMaterial({ color:hx(C.floorEdge) })
-        );
-        edge.rotation.x = -Math.PI/2;
-        edge.position.set(rr.cx, y + 0.003, rr.cz);
-        g.add(edge);
-        // room labels render from the draggable labels layer, not here
-      });
-
-      const wallMat = new THREE.MeshStandardMaterial({ color:hx(C.wall), roughness:1, transparent:true, opacity:0.55 });
-      p.walls.forEach((wall) => {
-        const rr = gridRect(wall);
-        // Degenerate axes get a hairline minimum so thin walls still read.
-        const m = new THREE.Mesh(
-          new THREE.BoxGeometry(Math.max(rr.w, 0.06), WALL_STUB_H, Math.max(rr.d, 0.06)),
-          wallMat
-        );
-        m.position.set(rr.cx, y + WALL_STUB_H / 2, rr.cz);
-        g.add(m);
-      });
-      return g;
-    }
-
-    const floor0 = plan ? buildFloorFromPlan(0, plan) : buildFloor(0, 0);
+    const floor0 = plan ? buildPlanFloor(plan, 0) : buildFloor(0, 0);
     const floor1 = buildFloor(FLOOR_H, 1); // generic until a 2nd-floor OBJ exists
     scene.add(floor0, floor1);
 
@@ -322,16 +247,37 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
       const hit = ray.intersectObjects(spheres, false)[0];
       return hit ? markerMeshes.find(m => m.sphere === hit.object) : null;
     };
-    const hitLabel = () => {
-      const sprs = labelMeshes.filter(m=>m.spr.visible).map(m=>m.spr);
-      const hit = ray.intersectObjects(sprs, false)[0];
-      return hit ? labelMeshes.find(m => m.spr === hit.object) : null;
-    };
+    // Labels are hit-tested in SCREEN space (project the sprite center,
+    // compare pixel distance) — deterministic across three.js versions,
+    // with touch-friendly padding. Sprite raycasting proved unreliable
+    // here: misses sent the pointer through to camera panning, which is
+    // exactly the "can't drag labels" symptom.
+    const _pv = new THREE.Vector3();
+    function hitLabelAt(clientX, clientY) {
+      const r = renderer.domElement.getBoundingClientRect();
+      const px = clientX - r.left, py = clientY - r.top;
+      let best = null, bestD = Infinity;
+      labelMeshes.forEach((lm) => {
+        if (!lm.spr.visible) return;
+        _pv.copy(lm.spr.position).project(cam);
+        const sx = (_pv.x + 1) / 2 * r.width;
+        const sy = (1 - _pv.y) / 2 * r.height;
+        const pxPerWorld = r.width / ((cam.right - cam.left) / cam.zoom);
+        const hw = (lm.spr.scale.x / 2) * pxPerWorld + 12;
+        const hh = (lm.spr.scale.y / 2) * pxPerWorld + 12;
+        const d = Math.hypot(px - sx, py - sy);
+        if (Math.abs(px - sx) <= hw && Math.abs(py - sy) <= hh && d < bestD) { best = lm; bestD = d; }
+      });
+      return best;
+    }
 
     // drag-to-place (edit mode: markers AND labels), drag-to-pan otherwise,
     // pinch-to-zoom with two pointers.
     let dragging = null;        // marker being moved
     let draggingLabel = null;   // label being moved
+    let labelMoved = false;     // did the label drag exceed the tap threshold
+    let downAt = { x: 0, y: 0 };
+    let lastTap = { id: null, t: 0 };  // double-tap rename bookkeeping
     let panning = null;         // {x,y} last pointer for pan
     const dragPlane = new THREE.Plane();
     const dragPoint = new THREE.Vector3();
@@ -347,10 +293,12 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
         return;
       }
       setPtr(e.clientX, e.clientY);
-      const lm = editRef.current ? hitLabel() : null;
+      const lm = editRef.current ? hitLabelAt(e.clientX, e.clientY) : null;
       const m = editRef.current && !lm ? hitMarker() : null;
       if (lm) {
         draggingLabel = lm;
+        labelMoved = false;
+        downAt = { x: e.clientX, y: e.clientY };
         dragPlane.set(new THREE.Vector3(0,1,0), -(lm.floor * FLOOR_H + 0.9));
         renderer.domElement.setPointerCapture(e.pointerId);
         e.preventDefault();
@@ -374,6 +322,8 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
         return;
       }
       if (draggingLabel) {
+        if (!labelMoved && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 5) return;
+        labelMoved = true;
         setPtr(e.clientX, e.clientY);
         if (ray.ray.intersectPlane(dragPlane, dragPoint)) {
           draggingLabel.spr.position.x = Math.max(-6, Math.min(6, dragPoint.x));
@@ -398,7 +348,18 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchDist = 0;
       if (draggingLabel) {
-        onLabelMoved?.(draggingLabel.id, draggingLabel.spr.position.x, draggingLabel.spr.position.z);
+        if (labelMoved) {
+          onLabelMoved?.(draggingLabel.id, draggingLabel.spr.position.x, draggingLabel.spr.position.z);
+        } else {
+          // a tap: second tap on the same label within 400ms renames it
+          const now = performance.now();
+          if (lastTap.id === draggingLabel.id && now - lastTap.t < 400) {
+            lastTap = { id: null, t: 0 };
+            onLabelRename?.(draggingLabel.id);
+          } else {
+            lastTap = { id: draggingLabel.id, t: now };
+          }
+        }
         draggingLabel = null;
         return;
       }
@@ -418,13 +379,6 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
       const m = hitMarker();
       onPick(m ? m.id : null);
     }
-    // Rename: double-click / double-tap a label in edit mode.
-    function onDblClick(e) {
-      if (!editRef.current) return;
-      setPtr(e.clientX, e.clientY);
-      const lm = hitLabel();
-      if (lm) onLabelRename?.(lm.id);
-    }
     function onWheel(e) {
       e.preventDefault();
       setZoom(zoom * Math.exp(-e.deltaY * 0.0012));
@@ -434,7 +388,6 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointercancel", onPointerUp);
     renderer.domElement.addEventListener("click", onClick);
-    renderer.domElement.addEventListener("dblclick", onDblClick);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
     renderer.domElement.style.touchAction = "none";
 
@@ -507,7 +460,6 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerUp);
       renderer.domElement.removeEventListener("click", onClick);
-      renderer.domElement.removeEventListener("dblclick", onDblClick);
       renderer.domElement.removeEventListener("wheel", onWheel);
       renderer.dispose();
       if (renderer.domElement.parentNode) mount.removeChild(renderer.domElement);

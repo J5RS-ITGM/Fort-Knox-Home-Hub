@@ -1,5 +1,7 @@
 """REST API routes."""
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -186,6 +188,88 @@ async def export_sensors(session: AsyncSession = Depends(get_session)) -> Respon
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+# -- weather radar (RainViewer proxy) ----------------------------------------
+# RainViewer is an explicitly approved external dependency (see CLAUDE.md).
+# Proxied through the backend so clients — wall panels on default-deny
+# VLANs — only ever talk to this app. No API key involved. Meta is cached
+# for 60s; tiles in a small in-memory LRU (they're immutable per-timestamp).
+import time as _time
+from collections import OrderedDict
+
+_radar_meta: dict = {"at": 0.0, "data": None}
+_radar_tiles: OrderedDict[str, bytes] = OrderedDict()
+_RADAR_TILE_CACHE = 400
+
+
+async def _radar_settings(session: AsyncSession) -> tuple[float | None, float | None]:
+    lat = await session.get(models.AppSetting, "latitude")
+    lon = await session.get(models.AppSetting, "longitude")
+    try:
+        return (float(lat.value) if lat and lat.value else None,
+                float(lon.value) if lon and lon.value else None)
+    except ValueError:
+        return None, None
+
+
+@protected.get("/radar/meta")
+async def radar_meta(session: AsyncSession = Depends(get_session)) -> dict:
+    import httpx
+
+    lat, lon = await _radar_settings(session)
+    now = _time.monotonic()
+    if _radar_meta["data"] is None or now - _radar_meta["at"] > 60:
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get("https://api.rainviewer.com/public/weather-maps.json")
+                r.raise_for_status()
+                _radar_meta.update(at=now, data=r.json())
+        except Exception as exc:  # noqa: BLE001
+            if _radar_meta["data"] is None:
+                raise HTTPException(503, f"radar service unreachable: {exc}") from exc
+    data = _radar_meta["data"]
+    frames = [
+        {"ts": f["time"], "path": f["path"], "nowcast": False}
+        for f in data.get("radar", {}).get("past", [])
+    ] + [
+        {"ts": f["time"], "path": f["path"], "nowcast": True}
+        for f in data.get("radar", {}).get("nowcast", [])
+    ]
+    return {"frames": frames, "lat": lat, "lon": lon}
+
+
+_RADAR_PATH_RE = re.compile(r"^/v2/radar/[A-Za-z0-9_]+$")
+
+
+@protected.get("/radar/tile/{z}/{x}/{y}")
+async def radar_tile(z: int, x: int, y: int, path: str) -> Response:
+    import httpx
+
+    # `path` comes from the meta payload (e.g. "/v2/radar/1650000000" or
+    # "/v2/radar/nowcast_a1b2c3"); validate strictly — this is a proxy.
+    if not _RADAR_PATH_RE.match(path):
+        raise HTTPException(422, "invalid radar frame path")
+    if not (2 <= z <= 12):
+        raise HTTPException(422, "zoom out of range")
+    key = f"{path}/{z}/{x}/{y}"
+    if key in _radar_tiles:
+        _radar_tiles.move_to_end(key)
+        return Response(_radar_tiles[key], media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=600"})
+    # color scheme 2 (universal blue), smoothed, snow shown
+    url = f"https://tilecache.rainviewer.com{path}/256/{z}/{x}/{y}/2/1_1.png"
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"radar tile fetch failed: {exc}") from exc
+    _radar_tiles[key] = r.content
+    while len(_radar_tiles) > _RADAR_TILE_CACHE:
+        _radar_tiles.popitem(last=False)
+    return Response(r.content, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=600"})
 
 
 # -- sensor placements -------------------------------------------------------

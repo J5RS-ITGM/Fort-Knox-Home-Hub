@@ -7,6 +7,7 @@ import {
   Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause,
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
+import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState } from "@/lib/planScene";
 import AlarmControl from "@/components/AlarmControl";
 import { useHomeHub } from "@/lib/useHomeHub";
 
@@ -35,20 +36,8 @@ const hx = (h) => new THREE.Color(h);
 // Board placements keyed by REAL backend entity_ids. Positions are static
 // here for now; next step is loading them from /api/placements so they're
 // editable and shared with the full SecurityBoard module.
-const SENSORS = [
-  { id:"binary_sensor.front_door_contact",     type:"contact", floor:0, room:0, pos:[-2.2,0,-3.4], label:"Front Door" },
-  { id:"binary_sensor.basement_window_contact",type:"contact", floor:0, room:0, pos:[-3.6,0,-1.9], label:"Basement Window" },
-  { id:"binary_sensor.kitchen_window_contact", type:"contact", floor:0, room:1, pos:[ 2.2,0,-1.9], label:"Kitchen Window" },
-  { id:"binary_sensor.back_door_contact",      type:"contact", floor:0, room:3, pos:[ 1.3,0, 3.4], label:"Back Door" },
-  { id:"binary_sensor.garage_entry_contact",   type:"contact", floor:0, room:2, pos:[-2.6,0, 3.0], label:"Garage Entry" },
-  { id:"binary_sensor.basement_motion",        type:"motion",  floor:0, room:3, pos:[ 0.9,0, 1.6], label:"Basement Motion" },
-  { id:"binary_sensor.driveway_person",        type:"motion",  floor:0, room:0, pos:[-1.2,0,-3.4], label:"Driveway Person" },
-  { id:"binary_sensor.water_heater_leak",      type:"leak",    floor:0, room:2, pos:[-3.2,0, 1.4], label:"Water Heater" },
-  { id:"binary_sensor.sump_pit_leak",          type:"leak",    floor:0, room:2, pos:[-1.6,0, 1.4], label:"Sump Pit" },
-  { id:"binary_sensor.hallway_motion",         type:"motion",  floor:1, room:3, pos:[ 1.3,0, 1.9], label:"Hallway Motion" },
-  { id:"binary_sensor.laundry_leak",           type:"leak",    floor:1, room:2, pos:[-2.4,0, 1.9], label:"Laundry" },
-  { id:"binary_sensor.smoke_co_bridge",        type:"smoke",   floor:1, room:1, pos:[ 2.2,0,-1.9], label:"Smoke/CO" },
-];
+// (hardcoded SENSORS list retired — markers come from /api/placements,
+//  the same source the Security board uses)
 const ROOMS = {
   0: [[-2.35,-1.95,3.9,3.3,"Living Room"],[2.35,-1.95,3.9,3.3,"Kitchen"],[-2.35,1.95,3.9,3.3,"Garage"],[2.35,1.95,3.9,3.3,"Family Room"]],
   1: [[-2.35,-1.95,3.9,3.3,"Master Bed"],[2.35,-1.95,3.9,3.3,"Bedroom 2"],[-2.35,1.95,3.9,3.3,"Bath"],[2.35,1.95,3.9,3.3,"Landing"]],
@@ -74,7 +63,7 @@ function colorFor(type, live, armed) {
   return C.secure;
 }
 
-function Board({ liveStateRef, armedRef, floorView }) {
+function Board({ plan, placements, labels, liveStateRef, armedRef, floorView }) {
   const mountRef = useRef();
   useEffect(() => {
     const mount = mountRef.current;
@@ -118,23 +107,39 @@ function Board({ liveStateRef, armedRef, floorView }) {
       const spr = makeLabel(text); spr.position.set(cx, y+0.95, cz); g.add(spr);
       return g;
     }
+    // Floors: identical geometry to the Security board (shared builder).
+    // Ground floor comes from the Sweet Home 3D plan when present; the
+    // generic room boxes remain the fallback and the upstairs placeholder.
+    const FLOOR_H_P = 2.4;
     const floorGroups = { 0:new THREE.Group(), 1:new THREE.Group() };
-    [0,1].forEach(fi => {
-      const y = fi*2.4;
-      ROOMS[fi].forEach(([cx,cz,w,dp,label]) => floorGroups[fi].add(buildRoom(cx,cz,w,dp,y,label)));
-      scene.add(floorGroups[fi]);
+    if (plan) {
+      floorGroups[0].add(buildPlanFloor(plan, 0));
+    } else {
+      ROOMS[0].forEach(([cx,cz,w,dp,label]) => floorGroups[0].add(buildRoom(cx,cz,w,dp,0,label)));
+    }
+    ROOMS[1].forEach(([cx,cz,w,dp,label]) => floorGroups[1].add(buildRoom(cx,cz,w,dp,FLOOR_H_P, plan ? "" : label)));
+    scene.add(floorGroups[0]);
+    scene.add(floorGroups[1]);
+
+    // Room labels: the same records the Security board editor maintains.
+    (labels ?? []).forEach((l) => {
+      if (!l.text) return;
+      const spr = makeTextSprite(l.text, { scale: 0.9 });
+      spr.position.set(l.x, l.floor * FLOOR_H_P + 0.9, l.z);
+      floorGroups[l.floor]?.add(spr);
     });
 
+    // Markers: live placements (grid coords, y->z), same as the board.
     const markers = [];
-    SENSORS.forEach(s => {
-      const y = s.floor*2.4 + 0.55; const grp = new THREE.Group(); grp.position.set(s.pos[0],y,s.pos[2]);
+    (placements ?? []).forEach(s => {
+      const y = s.floor*2.4 + 0.55; const grp = new THREE.Group(); grp.position.set(s.x,y,s.y);
       const drop = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,0.5,6), new THREE.MeshBasicMaterial({ color:hx(C.secure), transparent:true, opacity:0.5 }));
       drop.position.y=-0.25; grp.add(drop);
       const sph = new THREE.Mesh(new THREE.SphereGeometry(0.26,20,20), new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 }));
       grp.add(sph);
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.36,0.46,32), new THREE.MeshBasicMaterial({ color:hx(C.open), transparent:true, opacity:0.55, side:THREE.DoubleSide }));
       ring.rotation.x=-Math.PI/2; ring.position.y=-0.22; ring.visible=false; grp.add(ring);
-      scene.add(grp); markers.push({ id:s.id, floor:s.floor, type:s.type, grp, sph, drop, ring });
+      scene.add(grp); markers.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sph, drop, ring });
     });
 
     let raf, t=0;
@@ -155,116 +160,128 @@ function Board({ liveStateRef, armedRef, floorView }) {
     function onResize(){ W=mount.clientWidth||W; H=mount.clientHeight||H; const a=W/H; cam.left=-d*a; cam.right=d*a; cam.top=d; cam.bottom=-d; cam.updateProjectionMatrix(); renderer.setSize(W,H); }
     const ro=new ResizeObserver(onResize); ro.observe(mount);
     return ()=>{ cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); if(renderer.domElement.parentNode) mount.removeChild(renderer.domElement); };
-  }, [floorView, liveStateRef, armedRef]);
+  }, [floorView, plan, placements, labels, liveStateRef, armedRef]);
   return <div ref={mountRef} style={{ width:"100%", height:"100%" }} />;
 }
 
-// ================= RADAR (placeholder until RainViewer module) =====================
-const FRAME_COUNT = 13;
-function MockRadar({ onClose }) {
+// ================= RADAR (live — RainViewer via backend proxy) ================
+// A radar "scope": RainViewer precipitation tiles composited on a dark
+// field, centered on the home coordinates from Admin -> Settings, with
+// range rings instead of a third-party basemap (keeps egress to the one
+// approved service, proxied server-side so panels stay local-only).
+const RADAR_Z = 7; // ~city-to-regional scale
+function LiveRadar({ onClose }) {
   const canvasRef = useRef();
-  const [idx, setIdx] = useState(FRAME_COUNT - 4);
+  const [meta, setMeta] = useState(null);   // {frames, lat, lon} | {error}
+  const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(true);
+  const [tick, setTick] = useState(0);      // bumped when tiles finish loading
+  const imgCache = useRef(new Map());       // "path/z/x/y" -> HTMLImageElement
 
-  const cells = useMemo(() => {
-    const rng = (s) => { let x = Math.sin(s) * 10000; return x - Math.floor(x); };
-    return Array.from({ length: 7 }, (_, i) => ({
-      x0: rng(i * 3.1) * 0.5 - 0.1,
-      y: 0.2 + rng(i * 7.7) * 0.6,
-      r: 40 + rng(i * 2.3) * 90,
-      intensity: 0.5 + rng(i * 5.5) * 0.5,
-      speed: 0.018 + rng(i * 1.9) * 0.02,
-    }));
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch(`${API_URL}/api/radar/meta`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`radar meta ${r.status}`)))
+      .then((m) => { if (alive) { setMeta(m); setIdx(Math.max(0, m.frames.length - m.frames.filter(f=>f.nowcast).length - 1)); } })
+      .catch((e) => { if (alive) setMeta({ error: String(e.message || e) }); });
+    load();
+    const t = setInterval(load, 5 * 60 * 1000);
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
   useEffect(() => {
-    const cv = canvasRef.current; if (!cv) return;
-    const ctx = cv.getContext("2d");
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const draw = () => {
-      const W = cv.clientWidth, H = cv.clientHeight;
-      cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
-      ctx.fillStyle = "#0f1622"; ctx.fillRect(0,0,W,H);
-      ctx.strokeStyle = "rgba(107,138,253,0.10)"; ctx.lineWidth = 1;
-      for (let gx=0; gx<W; gx+=48){ ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,H); ctx.stroke(); }
-      for (let gy=0; gy<H; gy+=48){ ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(W,gy); ctx.stroke(); }
-      ctx.strokeStyle = "rgba(145,153,168,0.18)"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0,H*0.55); ctx.bezierCurveTo(W*0.3,H*0.5,W*0.6,H*0.62,W,H*0.5); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(W*0.5,0); ctx.lineTo(W*0.52,H); ctx.stroke();
-      const hx0 = W*0.5, hy0 = H*0.5;
-      ctx.fillStyle = "#6b8afd"; ctx.beginPath(); ctx.arc(hx0,hy0,5,0,Math.PI*2); ctx.fill();
-      ctx.strokeStyle = "rgba(107,138,253,0.5)"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(hx0,hy0,14,0,Math.PI*2); ctx.stroke();
-
-      const grad = (r,g,b,a)=>`rgba(${r},${g},${b},${a})`;
-      cells.forEach(c => {
-        const cx = (c.x0 + c.speed * idx) * W;
-        const cy = c.y * H + Math.sin(idx*0.3 + c.y*6)*10;
-        if (cx < -c.r || cx > W + c.r) return;
-        const layers = [
-          [70,130,255,0.28, 1.0],
-          [60,200,140,0.34, 0.72],
-          [240,200,70,0.40, 0.46],
-          [224,72,61,0.46, 0.24],
-        ];
-        layers.forEach(([r,g,b,a,scale]) => {
-          const rad = c.r * scale * c.intensity;
-          const rg = ctx.createRadialGradient(cx,cy,0,cx,cy,rad);
-          rg.addColorStop(0, grad(r,g,b,a));
-          rg.addColorStop(1, grad(r,g,b,0));
-          ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(cx,cy,rad,0,Math.PI*2); ctx.fill();
-        });
-      });
-    };
-    draw();
-    const ro = new ResizeObserver(draw); ro.observe(cv);
-    return () => ro.disconnect();
-  }, [idx, cells]);
+    if (!playing || !meta?.frames?.length) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % meta.frames.length), 550);
+    return () => clearInterval(t);
+  }, [playing, meta]);
 
   useEffect(() => {
-    if (!playing) return;
-    const t = setInterval(() => setIdx(i => (i + 1) % FRAME_COUNT), 550);
-    return () => clearInterval(t);
-  }, [playing]);
+    const cv = canvasRef.current; if (!cv || !meta) return;
+    const ctx = cv.getContext("2d");
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#0d1420"; ctx.fillRect(0, 0, W, H);
 
-  const minsAgo = (FRAME_COUNT - 1 - idx) * 5;
-  const stamp = idx >= FRAME_COUNT - 3
-    ? (idx === FRAME_COUNT - 3 ? "now" : `+${(idx-(FRAME_COUNT-3))*5} min`)
-    : `${minsAgo} min ago`;
-  const isForecast = idx >= FRAME_COUNT - 2;
+    const centerMsg = (msg) => {
+      ctx.fillStyle = C.sub; ctx.font = "600 14px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(msg, W / 2, H / 2);
+    };
+    if (meta.error) return centerMsg("Radar unavailable — backend can't reach RainViewer");
+    if (meta.lat == null || meta.lon == null)
+      return centerMsg("Set Latitude/Longitude in Admin → Settings to enable radar");
+    const frame = meta.frames[idx]; if (!frame) return;
 
+    // slippy-map math at fixed zoom, home at canvas center
+    const n = 2 ** RADAR_Z;
+    const xt = ((meta.lon + 180) / 360) * n;
+    const latR = (meta.lat * Math.PI) / 180;
+    const yt = ((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2) * n;
+    const TILE = 256;
+    const originX = W / 2 - xt * TILE, originY = H / 2 - yt * TILE;
+
+    const x0 = Math.floor(xt - W / 2 / TILE), x1 = Math.floor(xt + W / 2 / TILE);
+    const y0 = Math.floor(yt - H / 2 / TILE), y1 = Math.floor(yt + H / 2 / TILE);
+    let pending = 0;
+    for (let tx = x0; tx <= x1; tx++) for (let ty = y0; ty <= y1; ty++) {
+      if (ty < 0 || ty >= n) continue;
+      const wx = ((tx % n) + n) % n;
+      const key = `${frame.path}/${RADAR_Z}/${wx}/${ty}`;
+      let img = imgCache.current.get(key);
+      if (!img) {
+        img = new Image();
+        img.src = `${API_URL}/api/radar/tile/${RADAR_Z}/${wx}/${ty}?path=${encodeURIComponent(frame.path)}`;
+        imgCache.current.set(key, img);
+        if (imgCache.current.size > 600) imgCache.current.delete(imgCache.current.keys().next().value);
+      }
+      if (img.complete && img.naturalWidth) {
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(img, originX + tx * TILE, originY + ty * TILE, TILE, TILE);
+        ctx.globalAlpha = 1;
+      } else { pending++; img.onload = () => setTick((t) => t + 1); }
+    }
+
+    // range rings: km per pixel at this latitude/zoom
+    const mPerPx = (156543.03392 * Math.cos(latR)) / n;
+    ctx.strokeStyle = "rgba(107,138,253,0.35)"; ctx.fillStyle = "rgba(145,153,168,0.9)";
+    ctx.lineWidth = 1; ctx.font = "600 11px system-ui"; ctx.textAlign = "left";
+    [25, 50, 100].forEach((mi) => {
+      const rp = (mi * 1609.34) / mPerPx;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, rp, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillText(`${mi} mi`, W / 2 + rp * 0.7071 + 4, H / 2 - rp * 0.7071 - 4);
+    });
+    ctx.fillStyle = "#6b8afd"; ctx.beginPath(); ctx.arc(W / 2, H / 2, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(107,138,253,0.6)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(W / 2, H / 2, 12, 0, Math.PI * 2); ctx.stroke();
+
+    // frame time badge
+    const dt = new Date(frame.ts * 1000);
+    const label = `${frame.nowcast ? "FORECAST " : ""}${dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    ctx.fillStyle = frame.nowcast ? "#f0a838" : C.text;
+    ctx.font = "700 13px system-ui"; ctx.textAlign = "left";
+    ctx.fillText(label, 14, H - 14);
+    if (pending) { ctx.fillStyle = C.sub; ctx.font = "600 11px system-ui"; ctx.fillText("loading tiles…", 14, 20); }
+  }, [meta, idx, tick]);
+
+  const frames = meta?.frames ?? [];
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:1000, background:C.bg0, display:"flex", flexDirection:"column" }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px", borderBottom:`1px solid ${C.edge}` }}>
-        <div style={{display:"flex", alignItems:"center", gap:12}}>
-          <Radar size={22} color={C.accent}/>
-          <span style={{fontSize:20, fontWeight:800}}>Weather Radar</span>
-          <span style={{fontSize:13, color: isForecast?C.motion:C.sub, fontWeight:600}}>{isForecast?"forecast":"observed"} · {stamp}</span>
-          <span style={{fontSize:11, color:C.subDim, marginLeft:4}}>(placeholder)</span>
-        </div>
-        <button onClick={onClose} style={{ display:"flex", alignItems:"center", gap:8, background:C.cardHi, color:C.text, border:`1px solid ${C.edge}`, borderRadius:12, padding:"10px 18px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-          <X size={18}/>Close
+    <div style={{ position:"fixed", inset:0, zIndex:50, background:"rgba(8,10,14,0.9)", backdropFilter:"blur(8px)", display:"flex", flexDirection:"column" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 18px" }}>
+        <Radar size={22} color={C.accent}/>
+        <span style={{fontSize:20, fontWeight:800, color:C.text}}>Weather Radar</span>
+        <span style={{fontSize:12, color:C.sub}}>RainViewer · updates every 5 min</span>
+        <div style={{flex:1}}/>
+        <button onClick={()=>setPlaying(p=>!p)} style={{ display:"flex", alignItems:"center", gap:6, background:"transparent", color:C.text, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+          {playing ? <Pause size={15}/> : <Play size={15}/>}{playing ? "Pause" : "Play"}
         </button>
+        <button onClick={onClose} style={{ background:"transparent", color:C.text, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 12px", cursor:"pointer" }}><X size={16}/></button>
       </div>
-
-      <div style={{ flex:1, position:"relative", minHeight:0 }}>
-        <canvas ref={canvasRef} style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}/>
-        <div style={{ position:"absolute", right:16, top:16, background:"rgba(12,14,19,0.8)", border:`1px solid ${C.edge}`, borderRadius:10, padding:"10px 12px", display:"flex", flexDirection:"column", gap:6 }}>
-          <span style={{fontSize:10, color:C.sub, fontWeight:700, letterSpacing:1, textTransform:"uppercase"}}>Intensity</span>
-          {[["#4682ff","Light"],["#3cc88c","Moderate"],["#f0c846","Heavy"],["#e0483d","Intense"]].map(([c,l])=>(
-            <div key={l} style={{display:"flex", alignItems:"center", gap:8, fontSize:11, color:C.sub}}>
-              <span style={{width:12,height:12,borderRadius:3,background:c}}/>{l}
-            </div>
-          ))}
-        </div>
+      <div style={{ flex:1, margin:"0 18px 8px", borderRadius:14, overflow:"hidden", border:`1px solid ${C.edge}` }}>
+        <canvas ref={canvasRef} style={{ width:"100%", height:"100%", display:"block" }}/>
       </div>
-
-      <div style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 20px", borderTop:`1px solid ${C.edge}` }}>
-        <button onClick={()=>setPlaying(p=>!p)} style={{...rBtn, background:C.accent, color:C.bg0, borderColor:C.accent}}>{playing? <Pause size={18}/> : <Play size={18}/>}</button>
-        <input type="range" min={0} max={FRAME_COUNT-1} value={idx}
-          onChange={(e)=>{ setPlaying(false); setIdx(+e.target.value); }}
-          style={{ flex:1, accentColor:C.accent }}/>
-        <span style={{fontSize:12, color:C.sub, minWidth:96, textAlign:"right", fontVariantNumeric:"tabular-nums"}}>{idx+1} / {FRAME_COUNT}</span>
-      </div>
+      <input type="range" min={0} max={Math.max(0, frames.length-1)} value={idx}
+        onChange={(e)=>{ setPlaying(false); setIdx(Number(e.target.value)); }}
+        style={{ margin:"0 18px 16px", accentColor:C.accent }}/>
     </div>
   );
 }
@@ -319,11 +336,40 @@ export default function WallPanel() {
   const armed = alarm ? alarm.state.startsWith("armed") : false;
 
   // board sensor states derived from live entities
+  // Plan geometry + placements + room labels: the same sources the
+  // Security board renders from, so the two views always match.
+  const [plan, setPlan] = useState(null);
+  const [placementRows, setPlacementRows] = useState([]);
+  const [boardLabels, setBoardLabels] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    fetchPlan().then((p) => { if (!cancelled) setPlan(p); });
+    fetch(`${API_URL}/api/placements`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => { if (!cancelled) setPlacementRows(rows); })
+      .catch(() => {});
+    fetchBoardState(API_URL).then((bs) => { if (!cancelled) setBoardLabels(bs.labels ?? {}); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const typeOf = (entity) => {
+    const dc = String(entity?.attributes?.device_class ?? "");
+    if (dc === "motion" || dc === "occupancy") return "motion";
+    if (dc === "moisture") return "leak";
+    if (dc === "smoke" || dc === "gas" || dc === "carbon_monoxide") return "smoke";
+    return "contact";
+  };
+  const placements = useMemo(
+    () => placementRows.map((p) => ({ ...p, type: typeOf(entities.get(p.entity_id)) })),
+    [placementRows, entities]
+  );
+  const labels = useMemo(() => defaultLabels(plan, ROOMS, boardLabels), [plan, boardLabels]);
+
   const liveState = useMemo(() => {
     const s = {};
-    SENSORS.forEach(x => { s[x.id] = boardStateFor(x, entities.get(x.id)); });
+    placements.forEach(x => { s[x.entity_id] = boardStateFor(x, entities.get(x.entity_id)); });
     return s;
-  }, [entities]);
+  }, [placements, entities]);
 
   // devices tile from live light/switch domains (+ sump monitor)
   const devices = useMemo(() => {
@@ -400,15 +446,15 @@ export default function WallPanel() {
 
   const summary = useMemo(()=>{
     let open=0,motion=0,low=0,offline=0;
-    SENSORS.forEach(s=>{
-      const l=liveState[s.id];
+    placements.forEach(s=>{
+      const l=liveState[s.entity_id];
       if(!l){ offline++; return; }
       if(l.state==="open"||l.state==="triggered")open++;
       if(l.state==="motion")motion++;
       if(l.battery<=15)low++;
     });
     return {open,motion,low,offline};
-  },[liveState]);
+  },[liveState,placements]);
   const allSecure = summary.open===0;
 
   // ---- actions → backend service API --------------------------------------
@@ -481,7 +527,7 @@ export default function WallPanel() {
   const tileContent = {
     board: (
       <Tile title="Home Map" edit={edit} onToggleVisible={()=>setVisible("board",false)} style={{padding:0}}>
-        <div style={{position:"absolute", inset:0}}><Board liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView}/></div>
+        <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView}/></div>
         <div style={{position:"absolute", top:12, left:14, fontSize:11, fontWeight:700, letterSpacing:1.3, textTransform:"uppercase", color:C.sub}}>Home Map</div>
         {!edit && (
           <div style={{position:"absolute", left:12, bottom:12, display:"flex", gap:6}}>
@@ -658,7 +704,7 @@ export default function WallPanel() {
         })}
       </div>
 
-      {showRadar && <MockRadar onClose={()=>setShowRadar(false)}/>}
+      {showRadar && <LiveRadar onClose={()=>setShowRadar(false)}/>}
     </div>
   );
 }
