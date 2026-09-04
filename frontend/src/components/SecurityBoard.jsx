@@ -118,8 +118,12 @@ function useIsNarrow(bp = 760) {
 // ------------------------------------------------------------------
 // Three.js scene
 // ------------------------------------------------------------------
-function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, narrow }) {
+// labels: [{id, text, floor, x, z}] — draggable in edit mode, dbl-tap to
+// rename. view: {zoom, tx, tz} initial camera state. onView fires
+// (debounced upstream) so zoom/pan persist per panel.
+function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow }) {
   const mountRef = useRef();
+  const zoomApi = useRef(null);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -129,8 +133,36 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
     const d = narrow ? 6.5 : 8;
     const aspect = W / H;
     const cam = new THREE.OrthographicCamera(-d*aspect, d*aspect, d, -d, 0.1, 100);
-    cam.position.set(11, 12, 11);
-    cam.lookAt(0, 1.4, 0);
+
+    // Camera rig: iso offset from a pannable ground target, with ortho
+    // zoom. Restored from the saved view; changes report up via onView.
+    const target = new THREE.Vector3(view?.tx ?? 0, 1.4, view?.tz ?? 0);
+    let zoom = Math.min(4, Math.max(0.5, view?.zoom ?? (narrow ? 1.15 : 1.35)));
+    function applyCam() {
+      cam.zoom = zoom;
+      cam.position.set(target.x + 11, 12, target.z + 11);
+      cam.lookAt(target.x, 1.4, target.z);
+      cam.updateProjectionMatrix();
+    }
+    applyCam();
+    const reportView = () => onView?.({ zoom, tx: target.x, tz: target.z });
+    function setZoom(z, silent) {
+      zoom = Math.min(4, Math.max(0.5, z));
+      applyCam();
+      if (!silent) reportView();
+    }
+    // Screen-space pan axes projected onto the ground plane (constant for
+    // a fixed iso heading): screen-right and screen-up in XZ.
+    const panRight = new THREE.Vector3(1, 0, -1).normalize();
+    const panUp = new THREE.Vector3(-1, 0, -1).normalize();
+    function panBy(dxPx, dyPx) {
+      const worldPerPx = (cam.right - cam.left) / cam.zoom / W;
+      target.addScaledVector(panRight, -dxPx * worldPerPx);
+      target.addScaledVector(panUp, dyPx * worldPerPx * 1.35); // iso foreshortening on the screen-Y axis
+      target.x = Math.max(-6, Math.min(6, target.x));
+      target.z = Math.max(-6, Math.min(6, target.z));
+      applyCam();
+    }
 
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -141,20 +173,20 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
     const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(8,14,6); scene.add(key);
     const fill = new THREE.DirectionalLight(0x6b7ce0, 0.25); fill.position.set(-6,8,-4); scene.add(fill);
 
-    function makeLabel(text) {
+    function makeLabel(text, ghost = false) {
       const cv = document.createElement("canvas");
-      const dpr = 2; cv.width = 256*dpr; cv.height = 64*dpr;
+      const dpr = 2; cv.width = 320*dpr; cv.height = 80*dpr;
       const ctx = cv.getContext("2d");
       ctx.scale(dpr,dpr);
-      ctx.font = "600 22px 'DM Sans', system-ui, sans-serif";
-      ctx.fillStyle = "rgba(232,235,242,0.92)";
+      ctx.font = `${ghost ? "500 italic" : "600"} 26px 'DM Sans', system-ui, sans-serif`;
+      ctx.fillStyle = ghost ? "rgba(126,140,156,0.85)" : "rgba(232,235,242,0.95)";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.shadowColor = "rgba(0,0,0,0.7)"; ctx.shadowBlur = 6;
-      ctx.fillText(text, 128, 32);
+      ctx.fillText(text, 160, 40);
       const tex = new THREE.CanvasTexture(cv);
       tex.minFilter = THREE.LinearFilter;
       const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false }));
-      spr.scale.set(2.2, 0.55, 1);
+      spr.scale.set(2.75, 0.69, 1);
       return spr;
     }
 
@@ -179,11 +211,7 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
         m.position.set(w[0], y+0.3, w[1]); g.add(m);
       });
 
-      ROOMS[floorIdx].forEach(([cx,cz,,,label])=>{
-        const spr = makeLabel(label);
-        spr.position.set(cx, y+0.9, cz);
-        g.add(spr);
-      });
+      ROOMS[floorIdx].forEach(()=>{ /* labels now render from the labels layer */ });
       return g;
     }
 
@@ -217,11 +245,7 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
         edge.rotation.x = -Math.PI/2;
         edge.position.set(rr.cx, y + 0.003, rr.cz);
         g.add(edge);
-        if (r.label) {
-          const spr = makeLabel(r.label);
-          spr.position.set(rr.cx, y + 0.9, rr.cz);
-          g.add(spr);
-        }
+        // room labels render from the draggable labels layer, not here
       });
 
       const wallMat = new THREE.MeshStandardMaterial({ color:hx(C.wall), roughness:1, transparent:true, opacity:0.55 });
@@ -273,6 +297,18 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
       markerMeshes.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sphere, drop, ring });
     });
 
+    // Draggable room labels. Empty-text labels appear only in edit mode as
+    // ghost placeholders ("tap to name") so unnamed rooms are discoverable.
+    const labelMeshes = [];
+    (labels ?? []).forEach((l) => {
+      const ghost = !l.text;
+      const spr = makeLabel(ghost ? "· · name · ·" : l.text, ghost);
+      spr.position.set(l.x, l.floor * FLOOR_H + 0.9, l.z);
+      spr.userData.labelId = l.id;
+      scene.add(spr);
+      labelMeshes.push({ id: l.id, floor: l.floor, ghost, spr });
+    });
+
     const ray = new THREE.Raycaster();
     const ptr = new THREE.Vector2();
     const setPtr = (clientX, clientY) => {
@@ -286,45 +322,121 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
       const hit = ray.intersectObjects(spheres, false)[0];
       return hit ? markerMeshes.find(m => m.sphere === hit.object) : null;
     };
+    const hitLabel = () => {
+      const sprs = labelMeshes.filter(m=>m.spr.visible).map(m=>m.spr);
+      const hit = ray.intersectObjects(sprs, false)[0];
+      return hit ? labelMeshes.find(m => m.spr === hit.object) : null;
+    };
 
-    // drag-to-place (edit mode)
-    let dragging = null;
+    // drag-to-place (edit mode: markers AND labels), drag-to-pan otherwise,
+    // pinch-to-zoom with two pointers.
+    let dragging = null;        // marker being moved
+    let draggingLabel = null;   // label being moved
+    let panning = null;         // {x,y} last pointer for pan
     const dragPlane = new THREE.Plane();
     const dragPoint = new THREE.Vector3();
+    const pointers = new Map(); // pointerId -> {x,y} for pinch
+    let pinchDist = 0;
 
     function onPointerDown(e) {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+        dragging = null; draggingLabel = null; panning = null;
+        return;
+      }
       setPtr(e.clientX, e.clientY);
-      const m = hitMarker();
-      if (editRef.current && m) {
+      const lm = editRef.current ? hitLabel() : null;
+      const m = editRef.current && !lm ? hitMarker() : null;
+      if (lm) {
+        draggingLabel = lm;
+        dragPlane.set(new THREE.Vector3(0,1,0), -(lm.floor * FLOOR_H + 0.9));
+        renderer.domElement.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      } else if (m) {
         dragging = m;
         dragPlane.set(new THREE.Vector3(0,1,0), -(m.floor * FLOOR_H + 0.5));
         renderer.domElement.setPointerCapture(e.pointerId);
         e.preventDefault();
+      } else {
+        panning = { x: e.clientX, y: e.clientY };
+        renderer.domElement.setPointerCapture(e.pointerId);
       }
     }
     function onPointerMove(e) {
-      if (!dragging) return;
-      setPtr(e.clientX, e.clientY);
-      if (ray.ray.intersectPlane(dragPlane, dragPoint)) {
-        dragging.grp.position.x = Math.max(-4.4, Math.min(4.4, dragPoint.x));
-        dragging.grp.position.z = Math.max(-3.65, Math.min(3.65, dragPoint.z));
+      if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchDist > 0) setZoom(zoom * (dist / pinchDist), true);
+        pinchDist = dist;
+        return;
+      }
+      if (draggingLabel) {
+        setPtr(e.clientX, e.clientY);
+        if (ray.ray.intersectPlane(dragPlane, dragPoint)) {
+          draggingLabel.spr.position.x = Math.max(-6, Math.min(6, dragPoint.x));
+          draggingLabel.spr.position.z = Math.max(-6, Math.min(6, dragPoint.z));
+        }
+        return;
+      }
+      if (dragging) {
+        setPtr(e.clientX, e.clientY);
+        if (ray.ray.intersectPlane(dragPlane, dragPoint)) {
+          dragging.grp.position.x = Math.max(-4.4, Math.min(4.4, dragPoint.x));
+          dragging.grp.position.z = Math.max(-3.65, Math.min(3.65, dragPoint.z));
+        }
+        return;
+      }
+      if (panning) {
+        panBy(e.clientX - panning.x, e.clientY - panning.y);
+        panning = { x: e.clientX, y: e.clientY };
       }
     }
-    function onPointerUp() {
-      if (!dragging) return;
-      onMoved(dragging.id, dragging.grp.position.x, dragging.grp.position.z);
-      dragging = null;
+    function onPointerUp(e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinchDist = 0;
+      if (draggingLabel) {
+        onLabelMoved?.(draggingLabel.id, draggingLabel.spr.position.x, draggingLabel.spr.position.z);
+        draggingLabel = null;
+        return;
+      }
+      if (dragging) {
+        onMoved(dragging.id, dragging.grp.position.x, dragging.grp.position.z);
+        dragging = null;
+        return;
+      }
+      if (panning) {
+        panning = null;
+        reportView();
+      }
     }
     function onClick(e){
-      if (editRef.current) return; // edit mode: drags, not selection
       setPtr(e.clientX, e.clientY);
+      if (editRef.current) return; // edit mode: drags, not selection
       const m = hitMarker();
       onPick(m ? m.id : null);
+    }
+    // Rename: double-click / double-tap a label in edit mode.
+    function onDblClick(e) {
+      if (!editRef.current) return;
+      setPtr(e.clientX, e.clientY);
+      const lm = hitLabel();
+      if (lm) onLabelRename?.(lm.id);
+    }
+    function onWheel(e) {
+      e.preventDefault();
+      setZoom(zoom * Math.exp(-e.deltaY * 0.0012));
     }
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
+    renderer.domElement.addEventListener("pointercancel", onPointerUp);
     renderer.domElement.addEventListener("click", onClick);
+    renderer.domElement.addEventListener("dblclick", onDblClick);
+    renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
+    renderer.domElement.style.touchAction = "none";
 
     let raf, t = 0;
     function animate() {
@@ -336,6 +448,11 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
 
       floor0.visible = floorView === "all" || floorView === 0;
       floor1.visible = floorView === "all" || floorView === 1;
+
+      labelMeshes.forEach(lm => {
+        const floorOk = floorView === "all" || floorView === lm.floor;
+        lm.spr.visible = floorOk && (!lm.ghost || edit); // ghosts only while editing
+      });
 
       markerMeshes.forEach(m => {
         const vis = floorView === "all" || floorView === m.floor;
@@ -374,19 +491,45 @@ function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRe
     const ro = new ResizeObserver(onResize);
     ro.observe(mount);
 
+    // Expose zoom controls to the overlay buttons rendered below.
+    zoomApi.current = {
+      in: () => setZoom(zoom * 1.25),
+      out: () => setZoom(zoom / 1.25),
+      reset: () => { target.set(0, 1.4, 0); setZoom(narrow ? 1.15 : 1.35, true); reportView(); },
+    };
+
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      zoomApi.current = null;
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
+      renderer.domElement.removeEventListener("pointercancel", onPointerUp);
       renderer.domElement.removeEventListener("click", onClick);
+      renderer.domElement.removeEventListener("dblclick", onDblClick);
+      renderer.domElement.removeEventListener("wheel", onWheel);
       renderer.dispose();
       if (renderer.domElement.parentNode) mount.removeChild(renderer.domElement);
     };
-  }, [floorView, narrow, sensors, plan, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved]);
+  }, [floorView, narrow, sensors, plan, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView]);
 
-  return <div ref={mountRef} style={{ width:"100%", height:"100%" }} />;
+  const zbtn = {
+    width: 40, height: 40, display: "grid", placeItems: "center",
+    background: "rgba(15,17,22,0.85)", color: C.text, fontSize: 19, fontWeight: 700,
+    border: `1px solid ${C.floorEdge}`, borderRadius: 10, cursor: "pointer",
+    touchAction: "manipulation", backdropFilter: "blur(6px)",
+  };
+  return (
+    <div style={{ width:"100%", height:"100%", position:"relative" }}>
+      <div ref={mountRef} style={{ width:"100%", height:"100%" }} />
+      <div style={{ position:"absolute", right:12, bottom:12, display:"flex", flexDirection:"column", gap:8, zIndex:4 }}>
+        <button style={zbtn} aria-label="Zoom in" onClick={() => zoomApi.current?.in()}>+</button>
+        <button style={zbtn} aria-label="Zoom out" onClick={() => zoomApi.current?.out()}>−</button>
+        <button style={{ ...zbtn, fontSize: 14 }} aria-label="Reset view" onClick={() => zoomApi.current?.reset()}>⤾</button>
+      </div>
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------
@@ -533,6 +676,95 @@ export default function SecurityBoard() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  // --- room labels + camera view: server-persisted board state ------------
+  // One layout row (panel_key "securityboard") holds {labels, view}.
+  // localStorage mirrors it for instant paint / offline. Label defaults
+  // come from the plan's rooms (floor 0) and the generic ROOMS (floor 1);
+  // overrides are keyed by label id so regenerating the plan JSON keeps
+  // your names and positions.
+  const LS_KEY = "hh_securityboard_state";
+  const [boardState, setBoardState] = useState(() => {
+    if (typeof window === "undefined") return { labels: {}, view: null };
+    try { return JSON.parse(localStorage.getItem(LS_KEY)) ?? { labels: {}, view: null }; }
+    catch { return { labels: {}, view: null }; }
+  });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/layouts/securityboard`, { credentials: "include" });
+        if (res.ok) {
+          const row = await res.json();
+          const parsed = JSON.parse(row.layout_json || "{}");
+          if (!cancelled && (parsed.labels || parsed.view)) {
+            setBoardState({ labels: parsed.labels ?? {}, view: parsed.view ?? null });
+          }
+        }
+      } catch { /* offline: localStorage state stands */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const saveTimer = useRef(null);
+  const persistBoard = useCallback((next) => {
+    setBoardState(next);
+    try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch {}
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      fetch(`${API_URL}/api/layouts/securityboard`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ layout_json: JSON.stringify(next) }),
+      }).catch(() => {});
+    }, 600);
+  }, []);
+
+  // default label set: plan rooms at their centers + generic upstairs
+  const labels = useMemo(() => {
+    const defaults = [];
+    if (plan) {
+      plan.rooms.forEach((r) => {
+        const rr = gridRect(r);
+        defaults.push({ id: r.id, text: r.label || "", floor: 0, x: rr.cx, z: rr.cz });
+      });
+    } else {
+      ROOMS[0].forEach(([cx, cz, , , label], i) => defaults.push({ id: `gen0_${i}`, text: label, floor: 0, x: cx, z: cz }));
+    }
+    ROOMS[1].forEach(([cx, cz, , , label], i) => defaults.push({ id: `gen1_${i}`, text: label, floor: 1, x: cx, z: cz }));
+    return defaults.map((d) => ({ ...d, ...(boardState.labels?.[d.id] ?? {}) }));
+  }, [plan, boardState.labels]);
+
+  // Callbacks read live state through refs and keep a stable identity, so
+  // camera saves (frequent) never retrigger the ThreeScene build effect.
+  const boardStateRef = useRef(boardState);
+  boardStateRef.current = boardState;
+  const labelsRef = useRef(labels);
+  labelsRef.current = labels;
+
+  const onLabelMoved = useCallback((id, x, z) => {
+    const bs = boardStateRef.current;
+    const cur = labelsRef.current.find((l) => l.id === id);
+    persistBoard({
+      ...bs,
+      labels: { ...bs.labels, [id]: { ...(bs.labels?.[id] ?? {}), text: cur?.text ?? "", x, z } },
+    });
+  }, [persistBoard]);
+
+  const onLabelRename = useCallback((id) => {
+    const bs = boardStateRef.current;
+    const cur = labelsRef.current.find((l) => l.id === id);
+    const text = window.prompt("Room name (blank to hide):", cur?.text ?? "");
+    if (text === null) return;
+    persistBoard({
+      ...bs,
+      labels: { ...bs.labels, [id]: { ...(bs.labels?.[id] ?? {}), text: text.trim(), x: cur?.x, z: cur?.z } },
+    });
+  }, [persistBoard]);
+
+  const onView = useCallback((view) => {
+    persistBoard({ ...boardStateRef.current, view });
+  }, [persistBoard]);
 
   // security-relevant HA entities that could go on the board
   const isSecuritySensor = (e) => {
@@ -795,9 +1027,10 @@ export default function SecurityBoard() {
     />
   ) : (
     <ThreeScene
-      sensors={sensors} plan={plan}
+      sensors={sensors} plan={plan} labels={labels} view={boardState.view}
       liveStateRef={liveStateRef} armedRef={armedRef} selectedRef={selectedRef} editRef={editRef}
-      floorView={floorView} onPick={setSelected} onMoved={onMoved} narrow={narrow}
+      floorView={floorView} onPick={setSelected} onMoved={onMoved}
+      onLabelMoved={onLabelMoved} onLabelRename={onLabelRename} onView={onView} narrow={narrow}
     />
   );
 

@@ -15,21 +15,31 @@ import AuthGate from "@/components/AuthGate";
 
 // ---------- helpers ----------------------------------------------------------
 
+// Curated dashboard: an entity renders ONLY if a group claims it. There is
+// deliberately no "Other" catch-all — it inevitably filled with Z-Wave
+// plumbing (automations, Identify/Ping buttons, AC-mains + battery
+// diagnostics, legacy alarm CC entities). Everything remains in HA and in
+// Admin → Devices; this page is the family view, not the registry.
 const GROUPS: { key: string; label: string; match: (e: Entity) => boolean }[] = [
-  { key: "security", label: "Security", match: (e) => e.domain === "alarm_control_panel" || e.domain === "lock" || ["door", "window", "motion", "occupancy", "smoke"].includes(String(e.attributes.device_class)) },
-  { key: "water", label: "Water", match: (e) => e.domain === "valve" || String(e.attributes.device_class) === "moisture" || e.entity_id.includes("sump") },
-  { key: "climate", label: "Climate", match: (e) => e.domain === "climate" || e.entity_id.includes("humidity") },
+  {
+    key: "security", label: "Security",
+    match: (e) =>
+      e.domain === "lock" || e.domain === "siren" ||
+      ["door", "window", "motion", "occupancy", "smoke", "gas", "carbon_monoxide", "vibration"].includes(String(e.attributes.device_class)),
+  },
+  {
+    key: "water", label: "Water",
+    match: (e) => e.domain === "valve" || String(e.attributes.device_class) === "moisture" || e.entity_id.includes("sump"),
+  },
+  {
+    key: "climate", label: "Climate",
+    match: (e) =>
+      e.domain === "climate" ||
+      ["temperature", "humidity"].includes(String(e.attributes.device_class)) ||
+      e.entity_id.includes("humidity"),
+  },
   { key: "power", label: "Power & Lighting", match: (e) => e.domain === "switch" || e.domain === "light" },
 ];
-
-// Z-Wave JS exposes diagnostic entities per device (legacy "Alarm Type"/
-// "Alarm Level", tamper notifications, node status, RSSI…). They're real
-// entities in HA but noise on a family dashboard — they landed in "Other"
-// looking like alarms that don't exist. Hidden here, not in the backend:
-// HA remains the source of truth and other views can still use them.
-// Durable fix is disabling them per-device in HA (Settings → Devices).
-const NOISE = /(alarm_(type|level)$|any_alarm|tamper|cover_removed|node_status|last_seen|rssi|signal_strength|_interval$)/;
-const isNoise = (e: Entity) => NOISE.test(e.entity_id);
 
 function isAttention(e: Entity): boolean {
   if (e.domain === "lock") return e.state === "unlocked";
@@ -161,7 +171,7 @@ function EntityCard({ e }: { e: Entity }) {
 function DashboardInner() {
   const { entities, linkUp, bridgeUp } = useHomeHub();
   const { me } = useMe();
-  const list = useMemo(() => Array.from(entities.values()).filter((e) => !isNoise(e)), [entities]);
+  const list = useMemo(() => Array.from(entities.values()), [entities]);
   const alarm = entities.get("alarm_control_panel.homehub");
 
   const grouped = useMemo(() => {
@@ -171,8 +181,8 @@ function DashboardInner() {
       items.forEach((e) => used.add(e.entity_id));
       return { ...g, items };
     });
-    const rest = list.filter((e) => e.domain !== "alarm_control_panel" && !used.has(e.entity_id));
-    if (rest.length) rows.push({ key: "other", label: "Other", match: () => true, items: rest });
+    // No "Other" bucket: unmatched entities (automations, buttons,
+    // diagnostics…) simply don't render here. See GROUPS comment.
     return rows.filter((r) => r.items.length > 0);
   }, [list]);
 
