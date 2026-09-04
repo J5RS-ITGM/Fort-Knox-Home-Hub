@@ -1,15 +1,12 @@
 "use client";
 
-/** SensorFlash — full-screen sensor-name takeover, mounted globally.
+/** SensorFlash — corner alert card, mounted globally.
  *
- * Watches live entity state via useHomeHub. When a security sensor
- * transitions into its "active" state (door/window opens, motion detected,
- * leak wet, smoke alarm), it flashes the sensor's plain name across the
- * whole screen:
- *   - disarmed  -> amber flash  ("someone opened the back door")
- *   - armed     -> red flash    (intrusion)
- * Mounted once in the root layout, so it appears on every page and over
- * the wall panel. Auto-dismisses; newest event wins.
+ *   - disarmed -> amber card, auto-dismisses after 10s
+ *   - armed    -> red card, stays until acknowledged
+ * Mounted once in the root layout; shows on every page and over the wall
+ * panel. Seeds on first snapshot so it never fires on load. An unacked
+ * armed alert takes precedence over later amber events.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -19,30 +16,21 @@ import { useHomeHub } from "@/lib/useHomeHub";
 
 const AMBER = "#e8a33d";
 const RED = "#e0483d";
+const AMBER_MS = 10000;
 
-interface FlashEvent {
-  id: number;
-  name: string;
-  verb: string;
-  color: string;
-  armed: boolean;
-}
+interface FlashEvent { id: number; name: string; verb: string; armed: boolean; }
 
-function deviceClass(e: Entity): string {
-  return String(e.attributes?.device_class ?? "");
-}
+function deviceClass(e: Entity): string { return String(e.attributes?.device_class ?? ""); }
 
-// Is this entity a security sensor we should flash on, and is it "active"?
 function activeVerb(e: Entity): string | null {
   if (e.domain === "binary_sensor") {
     const dc = deviceClass(e);
-    const on = e.state === "on";
-    if (!on) return null;
+    if (e.state !== "on") return null;
     if (dc === "door" || dc === "window" || dc === "opening" || dc === "garage_door") return "Opened";
     if (dc === "motion" || dc === "occupancy" || dc === "presence") return "Motion";
     if (dc === "moisture") return "Leak";
     if (dc === "smoke") return "Smoke";
-    if (dc === "gas" || dc === "carbon_monoxide") return "Alarm";
+    if (dc === "gas" || dc === "carbon_monoxide") return "Gas / CO";
     if (dc === "vibration") return "Vibration";
     if (dc === "" || dc === "safety") return "Triggered";
   }
@@ -54,87 +42,90 @@ export default function SensorFlash() {
   const pathname = usePathname();
   const { entities } = useHomeHub();
   const [event, setEvent] = useState<FlashEvent | null>(null);
-  const [visible, setVisible] = useState(false);
 
-  const prev = useRef<Map<string, string>>(new Map()); // entity_id -> last state
+  const prev = useRef<Map<string, string>>(new Map());
   const seeded = useRef(false);
   const counter = useRef(0);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const amberTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventRef = useRef<FlashEvent | null>(null);
+  useEffect(() => { eventRef.current = event; }, [event]);
 
   const alarm = entities.get("alarm_control_panel.homehub");
-  const armed = alarm ? alarm.state.startsWith("armed") || alarm.state === "pending" || alarm.state === "triggered" : false;
+  const armed = alarm
+    ? alarm.state.startsWith("armed") || alarm.state === "pending" || alarm.state === "triggered"
+    : false;
   const armedRef = useRef(armed);
   useEffect(() => { armedRef.current = armed; }, [armed]);
 
   useEffect(() => {
-    // First snapshot: record states without flashing (don't fire on load).
     if (!seeded.current) {
       for (const e of entities.values()) prev.current.set(e.entity_id, e.state);
       seeded.current = true;
       return;
     }
-
     let latest: FlashEvent | null = null;
     for (const e of entities.values()) {
       const before = prev.current.get(e.entity_id);
       prev.current.set(e.entity_id, e.state);
-      if (before === e.state) continue; // no change
+      if (before === e.state) continue;
       const verb = activeVerb(e);
-      if (!verb) continue; // not an active-transition we flash on
-      // fire on the transition into active
-      latest = {
-        id: ++counter.current,
-        name: e.friendly_name || e.entity_id,
-        verb,
-        color: armedRef.current ? RED : AMBER,
-        armed: armedRef.current,
-      };
+      if (!verb) continue;
+      latest = { id: ++counter.current, name: e.friendly_name || e.entity_id, verb, armed: armedRef.current };
     }
-
-    if (latest) {
-      setEvent(latest);
-      setVisible(true);
-      if (hideTimer.current) clearTimeout(hideTimer.current);
-      hideTimer.current = setTimeout(() => setVisible(false), 4500);
-    }
+    if (!latest) return;
+    const cur = eventRef.current;
+    if (cur && cur.armed && !latest.armed) return; // don't bury an unacked armed alert
+    setEvent(latest);
+    if (amberTimer.current) { clearTimeout(amberTimer.current); amberTimer.current = null; }
+    if (!latest.armed) amberTimer.current = setTimeout(() => setEvent(null), AMBER_MS);
   }, [entities]);
 
   if (!event) return null;
   if (pathname === "/login" || pathname === "/setup") return null;
 
-  const color = event.color;
+  const color = event.armed ? RED : AMBER;
+  const dismiss = () => {
+    if (amberTimer.current) { clearTimeout(amberTimer.current); amberTimer.current = null; }
+    setEvent(null);
+  };
+
   return (
     <div
       aria-live="assertive"
       style={{
-        position: "fixed", inset: 0, zIndex: 9999,
-        display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center", textAlign: "center",
+        position: "fixed",
+        right: "max(16px, env(safe-area-inset-right))",
+        bottom: "max(16px, env(safe-area-inset-bottom))",
+        zIndex: 9999,
+        width: "min(360px, calc(100vw - 32px))",
+        borderRadius: 16,
         background: color,
-        opacity: visible ? 1 : 0,
-        pointerEvents: visible ? "auto" : "none",
-        transition: "opacity .25s ease",
-        animation: visible ? `hh-flash-${event.armed ? "red" : "amber"} .5s steps(1) 3` : "none",
+        color: "#0f1117",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+        padding: "16px 18px",
+        animation: event.armed ? "hh-card-red 0.9s ease-in-out infinite" : "hh-card-in 0.25s ease-out",
       }}
-      onClick={() => setVisible(false)}
     >
-      <div style={{
-        fontSize: "clamp(13px, 3vw, 20px)", letterSpacing: 3, textTransform: "uppercase",
-        fontWeight: 700, color: "#0f1117", marginBottom: "2vh",
-      }}>
-        {event.armed ? "⚠ Alarm · " : ""}{event.verb}
+      <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase" }}>
+        {event.armed ? "\u26A0 Alarm" : event.verb}
       </div>
-      <div style={{
-        fontSize: "clamp(32px, 9vw, 96px)", fontWeight: 800, color: "#0f1117",
-        padding: "0 4vw", lineHeight: 1.05,
-      }}>
+      <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, margin: "6px 0 2px" }}>
         {event.name}
       </div>
-      <div style={{
-        fontSize: "clamp(11px, 2vw, 15px)", color: "#0f1117bb", marginTop: "3vh",
-      }}>
-        tap to dismiss
-      </div>
+      {event.armed && (
+        <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>{event.verb} while armed</div>
+      )}
+      <button
+        onClick={dismiss}
+        style={{
+          marginTop: 12, width: "100%",
+          background: "#0f1117", color: color,
+          border: "none", borderRadius: 10, padding: "11px 0",
+          fontSize: 14, fontWeight: 800, cursor: "pointer",
+        }}
+      >
+        {event.armed ? "Acknowledge" : "Dismiss"}
+      </button>
     </div>
   );
 }
