@@ -43,22 +43,6 @@ const ROOMS = {
   ],
 };
 
-// First-run defaults, keyed by real backend entity ids. Written to
-// /api/placements once if the table is empty, then Postgres owns them.
-const DEFAULT_PLACEMENTS = [
-  { entity_id:"binary_sensor.front_door_contact",      floor:0, x:-2.2, y:-3.4, room:"Living Room" },
-  { entity_id:"binary_sensor.basement_window_contact", floor:0, x:-3.6, y:-1.9, room:"Living Room" },
-  { entity_id:"binary_sensor.kitchen_window_contact",  floor:0, x: 2.2, y:-1.9, room:"Kitchen" },
-  { entity_id:"binary_sensor.back_door_contact",       floor:0, x: 2.2, y: 3.4, room:"Family Room" },
-  { entity_id:"binary_sensor.garage_entry_contact",    floor:0, x:-2.6, y: 3.3, room:"Garage" },
-  { entity_id:"binary_sensor.basement_motion",         floor:0, x: 1.3, y: 1.9, room:"Family Room" },
-  { entity_id:"binary_sensor.driveway_person",         floor:0, x:-1.2, y:-3.4, room:"Living Room" },
-  { entity_id:"binary_sensor.water_heater_leak",       floor:0, x:-3.2, y: 1.4, room:"Garage" },
-  { entity_id:"binary_sensor.sump_pit_leak",           floor:0, x:-1.7, y: 1.4, room:"Garage" },
-  { entity_id:"binary_sensor.hallway_motion",          floor:1, x: 1.3, y: 1.9, room:"Landing / Hall" },
-  { entity_id:"binary_sensor.laundry_leak",            floor:1, x:-2.4, y: 1.9, room:"Bath" },
-  { entity_id:"binary_sensor.smoke_co_bridge",         floor:1, x: 2.2, y:-1.9, room:"Bedroom 2" },
-];
 
 function typeFor(entity) {
   const dc = String(entity?.attributes?.device_class ?? "");
@@ -355,7 +339,7 @@ function gridFromPlan(px, py) {
   return { x: (px / PLAN_W) * 8 - 4, y: (py / PLAN_H) * 7.5 - 3.75 };
 }
 
-function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved }) {
+function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt }) {
   const svgRef = useRef();
   const dragging = useRef(null);
 
@@ -391,18 +375,34 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
     dragging.current = null;
   };
 
+  // tap on the plan while a tray sensor is pending -> drop it there
+  const onPlanClick = (e) => {
+    if (!pendingPlace) return;
+    const { px, py } = toPlanPoint(e);
+    const { x, y } = gridFromPlan(px, py);
+    onPlaceAt(pendingPlace, x, y);
+  };
+
   return (
     <div style={{ width:"100%", height:"100%", display:"grid", placeItems:"center", position:"relative" }}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${PLAN_W} ${PLAN_H}`}
         preserveAspectRatio="xMidYMid meet"
-        style={{ width:"100%", height:"100%", touchAction:"none" }}
+        style={{ width:"100%", height:"100%", touchAction:"none", cursor: pendingPlace ? "crosshair" : "default" }}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onClick={onPlanClick}
       >
         {/* floor plan backdrop */}
         <image href={PLAN_URL} x="0" y="0" width={PLAN_W} height={PLAN_H} />
+
+        {pendingPlace && (
+          <text x={PLAN_W/2} y={28} fill={C.accent} fontSize="20" textAnchor="middle" fontWeight="700"
+                style={{ paintOrder:"stroke", stroke:"#000", strokeWidth:4 }}>
+            Tap where “{pendingPlace.label}” goes
+          </text>
+        )}
 
         {sensors.filter(s => s.floor === 0).map(s => {
           const { px, py } = planFromGrid(s.x, s.z);
@@ -442,31 +442,72 @@ export default function SecurityBoard() {
   const [floorView, setFloorView] = useState("all");
   const [selected, setSelected] = useState(null);
   const [edit, setEdit] = useState(false);
+  const [pendingPlace, setPendingPlace] = useState(null); // {entity_id,label,type} awaiting a tap on the plan
   const [saveNote, setSaveNote] = useState("");
   const narrow = useIsNarrow();
 
-  // load placements; seed defaults on first run
+  // load placements (no auto-seed: real sensors get placed via the tray)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch(`${API_URL}/api/placements`);
         const rows = res.ok ? await res.json() : [];
-        if (cancelled) return;
-        if (rows.length > 0) { setPlacements(rows); return; }
-        // empty table: seed the defaults so edit mode has rows to move
-        for (const p of DEFAULT_PLACEMENTS) {
-          await fetch(`${API_URL}/api/placements/${p.entity_id}`, {
-            method:"PUT", headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify(p),
-          }).catch(() => {});
-        }
-        if (!cancelled) setPlacements(DEFAULT_PLACEMENTS.map(p => ({ ...p, icon:null })));
+        if (!cancelled) setPlacements(rows);
       } catch {
-        if (!cancelled) setPlacements(DEFAULT_PLACEMENTS.map(p => ({ ...p, icon:null }))); // offline fallback
+        if (!cancelled) setPlacements([]); // offline: empty, tray will populate from entities
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // security-relevant HA entities that could go on the board
+  const isSecuritySensor = (e) => {
+    if (e.domain === "binary_sensor") {
+      const dc = String(e.attributes?.device_class ?? "");
+      return ["door","window","motion","occupancy","moisture","smoke","gas","carbon_monoxide","vibration","tamper"].includes(dc) || dc === "";
+    }
+    if (e.domain === "lock") return true;
+    return false;
+  };
+
+  // placed entity ids
+  const placedIds = useMemo(
+    () => new Set((placements ?? []).map(p => p.entity_id)),
+    [placements]
+  );
+
+  // sensors HA reports that have no placement yet -> the tray
+  const unplaced = useMemo(() => {
+    const out = [];
+    for (const e of entities.values()) {
+      if (isSecuritySensor(e) && !placedIds.has(e.entity_id)) {
+        out.push({ entity_id: e.entity_id, label: e.friendly_name || e.entity_id, type: typeFor(e) });
+      }
+    }
+    out.sort((a,b) => a.label.localeCompare(b.label));
+    return out;
+  }, [entities, placedIds]);
+
+  // create a placement for a tray sensor at a given plan position
+  const placeSensor = useCallback((entityId, x, y, floor = 0) => {
+    const e = entities.get(entityId);
+    const row = { entity_id: entityId, room: "", floor, x, y, icon: null };
+    setPlacements(prev => [...(prev ?? []), row]);
+    fetch(`${API_URL}/api/placements/${entityId}`, {
+      method:"PUT", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(row),
+    })
+      .then(r => setSaveNote(r.ok ? `Placed ${e?.friendly_name ?? entityId}` : "Place failed"))
+      .catch(() => setSaveNote("Place failed — offline?"));
+    setTimeout(() => setSaveNote(""), 2500);
+  }, [entities]);
+
+  // remove a placement (send sensor back to the tray)
+  const unplaceSensor = useCallback((entityId) => {
+    setPlacements(prev => (prev ?? []).filter(p => p.entity_id !== entityId));
+    fetch(`${API_URL}/api/placements/${entityId}`, { method:"DELETE" }).catch(() => {});
+    setSelected(null);
   }, []);
 
   // join placements with live entities: board model
@@ -619,7 +660,12 @@ export default function SecurityBoard() {
       <Row k="Battery" v={selLive ? `${selLive.battery}%` : "—"} vc={selLive && selLive.battery<=15?C.lowbat:C.text}/>
       <Row k="Entity" v={sel.entity_id} small/>
       <Row k="Last changed" v={selLive ? relTime(selLive.lastChanged) : "—"}/>
-      <button onClick={()=>setSelected(null)} style={{ marginTop:12, background:"transparent",
+      {edit && (
+        <button onClick={()=>unplaceSensor(sel.entity_id)} style={{ marginTop:10, background:"transparent",
+          color:C.open, border:`1px solid ${C.open}55`, borderRadius:8, padding:"9px 0",
+          width:"100%", cursor:"pointer", fontSize:12 }}>Remove from plan (back to tray)</button>
+      )}
+      <button onClick={()=>setSelected(null)} style={{ marginTop:8, background:"transparent",
         color:C.sub, border:`1px solid ${C.floorEdge}`, borderRadius:8, padding:"9px 0",
         width:"100%", cursor:"pointer", fontSize:12 }}>Clear selection</button>
     </div>
@@ -671,6 +717,8 @@ export default function SecurityBoard() {
     <FloorPlan2D
       sensors={sensors} liveState={liveState} armed={armed}
       selected={selected} edit={edit} onPick={setSelected} onMoved={onMoved}
+      pendingPlace={pendingPlace}
+      onPlaceAt={(sensor, x, y) => { placeSensor(sensor.entity_id, x, y, 0); setPendingPlace(null); }}
     />
   ) : (
     <ThreeScene
@@ -680,6 +728,46 @@ export default function SecurityBoard() {
     />
   );
 
+  // Placement tray: unplaced sensors, shown in edit mode on the 2D plan.
+  // Tap one to arm it, then tap the plan to drop it. Works on touch.
+  const tray = edit && viewMode === "plan" ? (
+    <div style={{
+      position:"absolute", right:12, top:12, width:210, maxHeight:"70%", overflowY:"auto",
+      background:"rgba(15,17,22,0.92)", border:`1px solid ${C.floorEdge}`, borderRadius:12,
+      padding:12, backdropFilter:"blur(8px)", zIndex:5,
+    }}>
+      <div style={{fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:C.sub, marginBottom:8}}>
+        Unplaced sensors {unplaced.length ? `(${unplaced.length})` : ""}
+      </div>
+      {unplaced.length === 0 && (
+        <div style={{fontSize:12, color:C.sub, lineHeight:1.5}}>
+          All paired sensors are placed. Pair a sensor in Home Assistant and it appears here.
+        </div>
+      )}
+      {unplaced.map(s => {
+        const c = { contact:C.secure, motion:C.motion, leak:C.accent, smoke:C.open }[s.type] || C.sub;
+        const armedForPlace = pendingPlace?.entity_id === s.entity_id;
+        return (
+          <button key={s.entity_id}
+            onClick={() => setPendingPlace(armedForPlace ? null : s)}
+            style={{
+              display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left",
+              background: armedForPlace ? C.accent : "rgba(255,255,255,0.03)",
+              color: armedForPlace ? "#0f1116" : C.text,
+              border:`1px solid ${armedForPlace ? C.accent : C.floorEdge}`, borderRadius:9,
+              padding:"8px 10px", marginBottom:6, cursor:"pointer", fontSize:12,
+            }}>
+            <span style={{width:9, height:9, borderRadius:9, background:c, flexShrink:0, boxShadow:`0 0 6px ${c}`}}/>
+            <span style={{overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{s.label}</span>
+          </button>
+        );
+      })}
+      {pendingPlace && (
+        <div style={{fontSize:11, color:C.accent, marginTop:4}}>Tap the plan to place, or tap again to cancel.</div>
+      )}
+    </div>
+  ) : null;
+
   // ---------------- MOBILE: stacked, scrollable ----------------
   if (narrow) {
     return (
@@ -688,6 +776,8 @@ export default function SecurityBoard() {
         <div style={{flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch"}}>
           <div style={{position:"relative", height:"46vh", minHeight:280}}>
             {scene}
+          {tray}
+            {tray}
             <div style={{position:"absolute", left:12, top:12}}>{viewToggle}</div>
             <div style={{position:"absolute", left:12, bottom:12}}>{floorToggle}</div>
           </div>
