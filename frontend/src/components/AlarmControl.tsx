@@ -17,8 +17,9 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { callService, Entity } from "@/lib/api";
+import { callService, Entity, ServiceError } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
+import { useMe } from "@/lib/auth";
 
 const ALARM_ENTITY = "alarm_control_panel.homehub";
 
@@ -51,11 +52,15 @@ export default function AlarmControl({
   variant?: "bar" | "compact";
 }) {
   const { entities } = useHomeHub();
+  const { me } = useMe();
   const alarm = entities.get(ALARM_ENTITY) as Entity | undefined;
   const state = alarm ? alarm.state : "unknown";
   const armed = state.startsWith("armed");
 
   const [command, setCommand] = useState<Cmd>(null);
+  // PIN keypad: non-null while waiting for digits for a pending arm/disarm
+  const [pinFor, setPinFor] = useState<null | { wantArmed: boolean }>(null);
+  const [pinError, setPinError] = useState("");
 
   // clear the pending command once HA reflects it (or after a failsafe timeout)
   useEffect(() => {
@@ -68,7 +73,7 @@ export default function AlarmControl({
     return () => clearTimeout(t);
   }, [command, state]);
 
-  const send = async (wantArmed: boolean) => {
+  const dispatch = async (wantArmed: boolean, pin?: string) => {
     if (!alarm) return;
     setCommand(wantArmed ? "arm" : "disarm");
     try {
@@ -76,10 +81,35 @@ export default function AlarmControl({
         "alarm_control_panel",
         wantArmed ? "alarm_arm_away" : "alarm_disarm",
         alarm.entity_id,
+        pin ? { pin } : {},
       );
+      setPinFor(null);
+      setPinError("");
     } catch (e) {
-      console.error(e);
       setCommand(null);
+      if (e instanceof ServiceError && e.detail === "pin_required") {
+        // Server says this account is PIN-gated (covers a stale `me`)
+        setPinFor({ wantArmed });
+        setPinError("");
+      } else if (e instanceof ServiceError && e.detail === "pin_invalid") {
+        setPinFor({ wantArmed });
+        setPinError("Wrong PIN");
+      } else if (e instanceof ServiceError && e.status === 429) {
+        setPinFor({ wantArmed });
+        setPinError("Too many attempts — wait a bit");
+      } else {
+        console.error(e);
+        setPinFor(null);
+      }
+    }
+  };
+
+  const send = (wantArmed: boolean) => {
+    if (me?.pin_set) {
+      setPinError("");
+      setPinFor({ wantArmed });
+    } else {
+      void dispatch(wantArmed);
     }
   };
 
@@ -135,6 +165,99 @@ export default function AlarmControl({
         compact={variant === "compact"}
       />
       {variant === "compact" && badge}
+      {pinFor && (
+        <PinPad
+          title={pinFor.wantArmed ? "PIN to arm" : "PIN to disarm"}
+          tone={pinFor.wantArmed ? C.alert : C.ok}
+          error={pinError}
+          busy={!!command}
+          onSubmit={(pin) => void dispatch(pinFor.wantArmed, pin)}
+          onCancel={() => { setPinFor(null); setPinError(""); setCommand(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Touch-first numeric keypad overlay (wall-panel friendly). The PIN is
+ *  verified server-side; this only collects digits. */
+function PinPad({
+  title, tone, error, busy, onSubmit, onCancel,
+}: {
+  title: string; tone: string; error: string; busy: boolean;
+  onSubmit: (pin: string) => void; onCancel: () => void;
+}) {
+  const [pin, setPin] = useState("");
+  useEffect(() => { if (error) setPin(""); }, [error]);
+
+  const press = (d: string) => setPin((p) => (p.length < 8 ? p + d : p));
+  const back = () => setPin((p) => p.slice(0, -1));
+
+  const key = (label: string, onClick: () => void, wide = false) => (
+    <button
+      key={label}
+      onClick={onClick}
+      disabled={busy}
+      style={{
+        gridColumn: wide ? "span 2" : undefined,
+        padding: "16px 0", fontSize: 20, fontWeight: 700,
+        color: C.ink, background: "#161b26", border: `1px solid ${C.line}`,
+        borderRadius: 12, cursor: "pointer", touchAction: "manipulation",
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center",
+        background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 280, padding: 18, borderRadius: 16,
+          background: C.field, border: `1px solid ${C.line}`,
+          display: "flex", flexDirection: "column", gap: 12,
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 700, color: tone, textAlign: "center" }}>{title}</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, minHeight: 14 }}>
+          {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
+            <span key={i} style={{
+              width: 12, height: 12, borderRadius: 12,
+              background: i < pin.length ? tone : "transparent",
+              border: `1.5px solid ${i < pin.length ? tone : C.line}`,
+            }} />
+          ))}
+        </div>
+        <div style={{ minHeight: 16, fontSize: 12, color: C.alert, textAlign: "center", fontWeight: 600 }}>
+          {error}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          {["1","2","3","4","5","6","7","8","9"].map((d) => key(d, () => press(d)))}
+          {key("⌫", back)}
+          {key("0", () => press("0"))}
+          {key("✕", onCancel)}
+        </div>
+        <button
+          onClick={() => onSubmit(pin)}
+          disabled={busy || pin.length < 4}
+          style={{
+            padding: "13px 0", fontSize: 15, fontWeight: 800, borderRadius: 12,
+            background: pin.length >= 4 ? tone : "#161b26",
+            color: pin.length >= 4 ? C.field : C.sub,
+            border: `1px solid ${pin.length >= 4 ? tone : C.line}`,
+            cursor: pin.length >= 4 ? "pointer" : "default", touchAction: "manipulation",
+          }}
+        >
+          {busy ? "Checking…" : "Confirm"}
+        </button>
+      </div>
     </div>
   );
 }

@@ -183,6 +183,14 @@ async def patch_user(
     if body.display_name is not None:
         user.display_name = body.display_name
         changes.append("display_name")
+    if body.pin is not None:
+        if not (body.pin.isdigit() and 4 <= len(body.pin) <= 8):
+            raise HTTPException(422, "PIN must be 4-8 digits")
+        user.pin_hash = hash_password(body.pin)
+        changes.append("pin_set")
+    if body.clear_pin:
+        user.pin_hash = None
+        changes.append("pin_cleared")
     await db.commit()
     await db.refresh(user)
     await audit(db, admin.username, "user_updated", f"{user.username}: {', '.join(changes) or 'no-op'}")

@@ -78,6 +78,7 @@ class UserOut(BaseModel):
     display_name: str
     role: str
     disabled: bool
+    pin_set: bool = False
     created_at: datetime
 
 
@@ -93,6 +94,8 @@ class UserPatch(BaseModel):
     disabled: bool | None = None
     password: str | None = None
     display_name: str | None = None
+    pin: str | None = None        # set a new arm/disarm PIN (4-8 digits)
+    clear_pin: bool | None = None  # true -> remove the PIN
 
 
 class AuditOut(BaseModel):

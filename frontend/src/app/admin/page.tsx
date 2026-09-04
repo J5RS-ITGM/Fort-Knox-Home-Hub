@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
-import { api, AuditRow, Entity, User } from "@/lib/api";
+import { api, API_URL, AuditRow, Entity, User } from "@/lib/api";
 
 interface AllowRule { id: string; domain: string; service: string; note: string }
 interface Family { id: string; name: string; emoji: string; color: string; sort: number; user_id: string | null }
@@ -121,6 +121,21 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
                     <button disabled={busy} className={btn} onClick={() => { const pw = window.prompt(`New password for ${u.username} (10+ chars):`); if (pw) patch(u.id, { password: pw }); }}>
                       Reset password
                     </button>
+                    <button disabled={busy} className={btn} onClick={() => {
+                      const pin = window.prompt(`Arm/disarm PIN for ${u.username} (4-8 digits):`);
+                      if (pin === null) return;
+                      if (!/^\d{4,8}$/.test(pin)) { window.alert("PIN must be 4-8 digits"); return; }
+                      patch(u.id, { pin });
+                    }}>
+                      {u.pin_set ? "Change PIN" : "Set PIN"}
+                    </button>
+                    {u.pin_set && (
+                      <button disabled={busy} className={btn} onClick={() => {
+                        if (window.confirm(`Remove ${u.username}'s alarm PIN? They will arm/disarm without one.`)) patch(u.id, { clear_pin: true });
+                      }}>
+                        Clear PIN
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -204,6 +219,11 @@ function DevicesTab({ placements, entities, busy, act }: { placements: Placement
   return (
     <section>
       <h2 className={sectionTitle}>Sensor placements <span className="normal-case tracking-normal">(drag mode also available on the Security board)</span></h2>
+      <div className="mb-3">
+        <a href={`${API_URL}/api/export/sensors.xlsx`} className={btn} download>
+          Export sensors (.xlsx)
+        </a>
+      </div>
       <div className="overflow-x-auto rounded-lg border border-line">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-line"><th className={th}>Entity</th><th className={th}>Room</th><th className={th}>Floor</th><th className={th}>X</th><th className={th}>Y</th><th className={th}>Live</th><th className={th}></th></tr></thead>

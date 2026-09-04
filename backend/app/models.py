@@ -29,8 +29,15 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(80), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="member")  # admin | member
     password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Optional arm/disarm PIN (bcrypt, like passwords). When set, the service
+    # proxy requires it for alarm_control_panel calls made by this user.
+    pin_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
     disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def pin_set(self) -> bool:
+        return self.pin_hash is not None
 
     layouts: Mapped[list["PanelLayout"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")

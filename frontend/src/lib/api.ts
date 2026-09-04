@@ -21,6 +21,7 @@ export interface User {
   display_name: string;
   role: "admin" | "member";
   disabled: boolean;
+  pin_set: boolean;
   created_at: string;
 }
 
@@ -57,6 +58,18 @@ export async function api(path: string, init: RequestInit = {}): Promise<Respons
   return res;
 }
 
+/** Error from the service proxy, carrying the backend's `detail` string
+ *  (e.g. "pin_required", "pin_invalid") so UI can react specifically. */
+export class ServiceError extends Error {
+  status: number;
+  detail: string;
+  constructor(status: number, detail: string) {
+    super(`Service call failed (${status}): ${detail}`);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 export async function callService(
   domain: string,
   service: string,
@@ -67,5 +80,8 @@ export async function callService(
     method: "POST",
     body: JSON.stringify({ entity_id: entityId, data }),
   });
-  if (!res.ok) throw new Error(`Service call failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ServiceError(res.status, String(body?.detail ?? res.statusText));
+  }
 }

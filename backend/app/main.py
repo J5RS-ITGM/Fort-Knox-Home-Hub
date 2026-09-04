@@ -32,6 +32,16 @@ async def lifespan(app: FastAPI):
     if settings.db_auto_create:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # create_all only creates missing TABLES; additive columns on
+            # existing tables must be ensured by hand until the deploy
+            # switches to `alembic upgrade head`. Guarded + idempotent.
+            def _ensure_columns(sync_conn):
+                from sqlalchemy import inspect, text
+                cols = {c["name"] for c in inspect(sync_conn).get_columns("users")}
+                if "pin_hash" not in cols:
+                    sync_conn.execute(text("ALTER TABLE users ADD COLUMN pin_hash VARCHAR(128)"))
+                    log.info("Added users.pin_hash column")
+            await conn.run_sync(_ensure_columns)
         log.info("Database tables ensured (%s)", settings.database_url.split("://")[0])
 
     from .db import SessionLocal

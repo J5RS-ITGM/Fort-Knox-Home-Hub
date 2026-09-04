@@ -22,6 +22,15 @@ const GROUPS: { key: string; label: string; match: (e: Entity) => boolean }[] = 
   { key: "power", label: "Power & Lighting", match: (e) => e.domain === "switch" || e.domain === "light" },
 ];
 
+// Z-Wave JS exposes diagnostic entities per device (legacy "Alarm Type"/
+// "Alarm Level", tamper notifications, node status, RSSI…). They're real
+// entities in HA but noise on a family dashboard — they landed in "Other"
+// looking like alarms that don't exist. Hidden here, not in the backend:
+// HA remains the source of truth and other views can still use them.
+// Durable fix is disabling them per-device in HA (Settings → Devices).
+const NOISE = /(alarm_(type|level)$|any_alarm|tamper|cover_removed|node_status|last_seen|rssi|signal_strength|_interval$)/;
+const isNoise = (e: Entity) => NOISE.test(e.entity_id);
+
 function isAttention(e: Entity): boolean {
   if (e.domain === "lock") return e.state === "unlocked";
   if (e.domain === "valve") return e.state === "open";
@@ -152,7 +161,7 @@ function EntityCard({ e }: { e: Entity }) {
 function DashboardInner() {
   const { entities, linkUp, bridgeUp } = useHomeHub();
   const { me } = useMe();
-  const list = useMemo(() => Array.from(entities.values()), [entities]);
+  const list = useMemo(() => Array.from(entities.values()).filter((e) => !isNoise(e)), [entities]);
   const alarm = entities.get("alarm_control_panel.homehub");
 
   const grouped = useMemo(() => {
