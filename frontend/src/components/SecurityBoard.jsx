@@ -334,8 +334,110 @@ function ThreeScene({ sensors, liveStateRef, armedRef, selectedRef, editRef, flo
 // ------------------------------------------------------------------
 // UI shell
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// 2D top-down floor plan renderer
+// Loads the SVG floor plan as a backdrop and places sensor markers by
+// their normalized placement coords. Same drag-to-place + onMoved
+// persistence as the isometric view, so positions set here save to
+// sensor_placements. Ground-floor placements only (floor 0); the plan
+// is the first floor.
+// ------------------------------------------------------------------
+const PLAN_URL = "/floorplans/first_floor.svg";
+// The plan's SVG viewBox (from the converter): 0..1000 x 0..885.5
+const PLAN_W = 1000, PLAN_H = 885.5;
+
+// placement coords live in the isometric grid space (-4..4 x, -3.75..3.75 y).
+// Map that onto the plan's pixel space for display, and invert on drag.
+function planFromGrid(x, y) {
+  return { px: ((x + 4) / 8) * PLAN_W, py: ((y + 3.75) / 7.5) * PLAN_H };
+}
+function gridFromPlan(px, py) {
+  return { x: (px / PLAN_W) * 8 - 4, y: (py / PLAN_H) * 7.5 - 3.75 };
+}
+
+function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved }) {
+  const svgRef = useRef();
+  const dragging = useRef(null);
+
+  const toPlanPoint = (e) => {
+    const svg = svgRef.current;
+    const rect = svg.getBoundingClientRect();
+    // map client px -> viewBox coords (viewBox is PLAN_W x PLAN_H, letterboxed)
+    const scale = Math.min(rect.width / PLAN_W, rect.height / PLAN_H);
+    const offx = (rect.width - PLAN_W * scale) / 2;
+    const offy = (rect.height - PLAN_H * scale) / 2;
+    const px = (e.clientX - rect.left - offx) / scale;
+    const py = (e.clientY - rect.top - offy) / scale;
+    return { px: Math.max(0, Math.min(PLAN_W, px)), py: Math.max(0, Math.min(PLAN_H, py)) };
+  };
+
+  const onDown = (e, id) => {
+    if (!edit) { onPick(id); return; }
+    e.preventDefault();
+    dragging.current = id;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onMove = (e) => {
+    if (!dragging.current) return;
+    const { px, py } = toPlanPoint(e);
+    const { x, y } = gridFromPlan(px, py);
+    onMoved(dragging.current, x, y, /*live*/ true); // live=true: update local only
+  };
+  const onUp = (e) => {
+    if (!dragging.current) return;
+    const { px, py } = toPlanPoint(e);
+    const { x, y } = gridFromPlan(px, py);
+    onMoved(dragging.current, x, y, /*live*/ false); // persist
+    dragging.current = null;
+  };
+
+  return (
+    <div style={{ width:"100%", height:"100%", display:"grid", placeItems:"center", position:"relative" }}>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${PLAN_W} ${PLAN_H}`}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ width:"100%", height:"100%", touchAction:"none" }}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+      >
+        {/* floor plan backdrop */}
+        <image href={PLAN_URL} x="0" y="0" width={PLAN_W} height={PLAN_H} />
+
+        {sensors.filter(s => s.floor === 0).map(s => {
+          const { px, py } = planFromGrid(s.x, s.z);
+          const live = liveState[s.entity_id];
+          const col = colorFor(s.type, live, armed);
+          const alert = col === C.open;
+          const isSel = selected === s.entity_id;
+          return (
+            <g key={s.entity_id}
+               style={{ cursor: edit ? "grab" : "pointer" }}
+               onPointerDown={(e)=>onDown(e, s.entity_id)}>
+              {(alert || isSel) && (
+                <circle cx={px} cy={py} r={22} fill={col} opacity={alert ? 0.28 : 0.15}>
+                  {alert && <animate attributeName="r" values="18;26;18" dur="1.4s" repeatCount="indefinite"/>}
+                </circle>
+              )}
+              <circle cx={px} cy={py} r={12} fill={col} opacity={0.25}/>
+              <circle cx={px} cy={py} r={7} fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 2 : 0}/>
+              {(edit || isSel) && (
+                <text x={px} y={py - 16} fill={C.text} fontSize="14" textAnchor="middle"
+                      style={{ paintOrder:"stroke", stroke:"#000", strokeWidth:3, pointerEvents:"none" }}>
+                  {s.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export default function SecurityBoard() {
   const { entities, linkUp, bridgeUp } = useHomeHub();
+  const [viewMode, setViewMode] = useState("iso"); // "iso" | "plan"
   const [placements, setPlacements] = useState(null); // null = loading
   const [floorView, setFloorView] = useState("all");
   const [selected, setSelected] = useState(null);
@@ -409,9 +511,12 @@ export default function SecurityBoard() {
     } catch (e) { console.error(e); }
   };
 
-  // marker drag finished → persist
-  const onMoved = useCallback((entityId, x, z) => {
+  // marker drag → update local always; persist only on drop (live === false).
+  // The isometric ThreeScene calls onMoved(id, x, z) with 3 args (persist);
+  // the 2D view calls with a 4th `live` flag to stream during drag.
+  const onMoved = useCallback((entityId, x, z, live = false) => {
     setPlacements(prev => prev?.map(p => p.entity_id === entityId ? { ...p, x, y: z } : p) ?? prev);
+    if (live) return; // mid-drag: update local only, don't hit the API on every frame
     const p = placements?.find(q => q.entity_id === entityId);
     fetch(`${API_URL}/api/placements/${entityId}`, {
       method:"PUT", headers:{ "Content-Type":"application/json" },
@@ -440,13 +545,26 @@ export default function SecurityBoard() {
 
   const floorToggle = (
     <div style={{display:"flex", gap:6}}>
-      {[["all","All"],[1,"Upstairs"],[0,"Ground"]].map(([v,l])=>(
+      {viewMode === "iso" && [["all","All"],[1,"Upstairs"],[0,"Ground"]].map(([v,l])=>(
         <button key={String(v)} onClick={()=>setFloorView(v)} style={{
           background: floorView===v ? C.floorEdge : "rgba(20,23,31,0.7)",
           color: floorView===v ? C.text : C.sub,
           border:`1px solid ${C.floorEdge}`, borderRadius:8,
           padding:"7px 14px", fontSize:12, cursor:"pointer", fontWeight:600,
           backdropFilter:"blur(6px)",
+        }}>{l}</button>
+      ))}
+    </div>
+  );
+
+  const viewToggle = (
+    <div style={{display:"flex", gap:6, background:"rgba(20,23,31,0.7)", borderRadius:9, padding:3, backdropFilter:"blur(6px)"}}>
+      {[["plan","Floor plan"],["iso","3D"]].map(([v,l])=>(
+        <button key={v} onClick={()=>{ setViewMode(v); setSelected(null); }} style={{
+          background: viewMode===v ? C.accent : "transparent",
+          color: viewMode===v ? "#0f1116" : C.sub,
+          border:"none", borderRadius:7, padding:"6px 13px", fontSize:12,
+          cursor:"pointer", fontWeight:700,
         }}>{l}</button>
       ))}
     </div>
@@ -529,6 +647,11 @@ export default function SecurityBoard() {
     <div style={{display:"grid", placeItems:"center", height:"100%", color:C.sub, fontSize:13}}>
       Loading placements…
     </div>
+  ) : viewMode === "plan" ? (
+    <FloorPlan2D
+      sensors={sensors} liveState={liveState} armed={armed}
+      selected={selected} edit={edit} onPick={setSelected} onMoved={onMoved}
+    />
   ) : (
     <ThreeScene
       sensors={sensors}
@@ -545,6 +668,7 @@ export default function SecurityBoard() {
         <div style={{flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch"}}>
           <div style={{position:"relative", height:"46vh", minHeight:280}}>
             {scene}
+            <div style={{position:"absolute", left:12, top:12}}>{viewToggle}</div>
             <div style={{position:"absolute", left:12, bottom:12}}>{floorToggle}</div>
           </div>
           <div style={{padding:"16px 16px 24px", display:"flex", flexDirection:"column", gap:14}}>
@@ -565,6 +689,7 @@ export default function SecurityBoard() {
       <div style={{flex:1, display:"flex", minHeight:0}}>
         <div style={{flex:1, position:"relative", minWidth:0}}>
           {scene}
+          <div style={{position:"absolute", left:16, top:16}}>{viewToggle}</div>
           <div style={{position:"absolute", left:16, bottom:16}}>{floorToggle}</div>
           <div style={{position:"absolute", right:16, top:16, maxWidth:200}}>{legend}</div>
         </div>
