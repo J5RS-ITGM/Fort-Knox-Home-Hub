@@ -365,7 +365,15 @@ SETTING_KEYS = {"home_name", "latitude", "longitude", "timezone"}
 
 @admin_router.get("/settings", response_model=list[SettingOut])
 async def list_settings(db: AsyncSession = Depends(get_session)) -> list[models.AppSetting]:
-    result = await db.execute(select(models.AppSetting).order_by(models.AppSetting.key))
+    # ONLY the editable, non-secret keys. app_settings also holds the HA
+    # bridge config — including the raw ha_token — which must never be
+    # returned by any API (architecture rule #2). The HA Bridge endpoints
+    # expose token_set as a boolean; nothing else gets the value out.
+    result = await db.execute(
+        select(models.AppSetting)
+        .where(models.AppSetting.key.in_(SETTING_KEYS))
+        .order_by(models.AppSetting.key)
+    )
     return list(result.scalars())
 
 
@@ -386,6 +394,10 @@ async def put_settings(
             row.value = value
     await db.commit()
     await audit(db, admin.username, "settings_updated", ", ".join(sorted(body.values)))
-    result = await db.execute(select(models.AppSetting).order_by(models.AppSetting.key))
+    result = await db.execute(
+        select(models.AppSetting)
+        .where(models.AppSetting.key.in_(SETTING_KEYS))
+        .order_by(models.AppSetting.key)
+    )
     return list(result.scalars())
 

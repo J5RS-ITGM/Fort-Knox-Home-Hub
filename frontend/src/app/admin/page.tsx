@@ -401,7 +401,12 @@ function SettingsTab({ settings, busy, act }: { settings: Record<string, string>
           </label>
         ))}
         <button disabled={busy} className={`${primary} mt-1 self-start`}
-          onClick={() => act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values: form }) }))}>
+          onClick={() => {
+            // send ONLY this form's fields — never echo back whatever the
+            // GET returned (defense in depth against key leakage)
+            const values = Object.fromEntries(fields.map(([key]) => [key, form[key] ?? ""]));
+            act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values }) }));
+          }}>
           Save settings
         </button>
         <p className="text-[11px] leading-relaxed text-ink-muted">
