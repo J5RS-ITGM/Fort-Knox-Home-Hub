@@ -13,8 +13,11 @@ import { useHomeHub } from "@/lib/useHomeHub";
  *   - sensor type derives from HA device_class, label from friendly_name
  *   - live state + armed come from useHomeHub; arm/disarm via services
  *   - Edit mode: drag markers on the floor plane, positions save back
- * Floor-plan geometry stays static until the Sweet Home 3D pipeline
- * replaces it; placements are already the coordinate source of truth.
+ *   - Ground-floor 3D geometry comes from the Sweet Home 3D pipeline:
+ *     backend/tools/obj2plan.py emits first_floor.plan.json in the SAME
+ *     viewBox transform as the 2D SVG, so 3D walls/rooms, the 2D plan,
+ *     and saved placements share one coordinate system. If the JSON is
+ *     missing, the generic demo geometry renders as a fallback.
  * ------------------------------------------------------------------ */
 
 const C = {
@@ -26,6 +29,25 @@ const hx = (h) => new THREE.Color(h);
 const FLOOR_H = 2.2;
 
 const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO" };
+
+// Floor-plan assets (both generated from the same Sweet Home 3D OBJ by
+// backend/tools/obj2svg.py and obj2plan.py — identical projection).
+const PLAN_URL = "/floorplans/first_floor.svg";
+const PLAN_JSON_URL = "/floorplans/first_floor.plan.json";
+// The plan's viewBox (from the converters): 0..1000 x 0..885.5
+const PLAN_W = 1000, PLAN_H = 885.5;
+// Isometric grid space is x -4..4, z -3.75..3.75; these map between the two.
+function planFromGrid(x, y) {
+  return { px: ((x + 4) / 8) * PLAN_W, py: ((y + 3.75) / 7.5) * PLAN_H };
+}
+function gridFromPlan(px, py) {
+  return { x: (px / PLAN_W) * 8 - 4, y: (py / PLAN_H) * 7.5 - 3.75 };
+}
+// A plan-space rectangle {x,y,w,h} as grid-space center + size.
+function gridRect(r) {
+  const a = gridFromPlan(r.x, r.y), b = gridFromPlan(r.x + r.w, r.y + r.h);
+  return { cx: (a.x + b.x) / 2, cz: (a.y + b.y) / 2, w: b.x - a.x, d: b.y - a.y };
+}
 
 // rooms: [centerX, centerZ, width, depth, label] per floor (static demo plan)
 const ROOMS = {
@@ -96,7 +118,7 @@ function useIsNarrow(bp = 760) {
 // ------------------------------------------------------------------
 // Three.js scene
 // ------------------------------------------------------------------
-function ThreeScene({ sensors, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, narrow }) {
+function ThreeScene({ sensors, plan, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, narrow }) {
   const mountRef = useRef();
 
   useEffect(() => {
@@ -164,8 +186,60 @@ function ThreeScene({ sensors, liveStateRef, armedRef, selectedRef, editRef, flo
       });
       return g;
     }
-    const floor0 = buildFloor(0, 0);
-    const floor1 = buildFloor(FLOOR_H, 1);
+
+    // Real geometry from the Sweet Home 3D pipeline (plan JSON, viewBox
+    // space -> grid space via gridRect). Walls render as waist-high stubs
+    // (real footprint, capped height) so markers stay visible from the
+    // isometric camera; real heights are in the JSON if a full-height
+    // mode is ever wanted.
+    const WALL_STUB_H = 0.55;
+    function buildFloorFromPlan(y, p) {
+      const g = new THREE.Group();
+      const ext = gridRect({ x: 0, y: 0, w: p.viewbox[0], h: p.viewbox[1] });
+
+      const slab = new THREE.Mesh(
+        new THREE.PlaneGeometry(ext.w, ext.d),
+        new THREE.MeshStandardMaterial({ color:hx(C.floor), roughness:0.95 })
+      );
+      slab.rotation.x = -Math.PI/2; slab.position.set(ext.cx, y, ext.cz); g.add(slab);
+
+      const roomMat = new THREE.MeshStandardMaterial({ color:hx("#242a38"), roughness:0.95 });
+      p.rooms.forEach((r) => {
+        const rr = gridRect(r);
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(rr.w, rr.d), roomMat);
+        floor.rotation.x = -Math.PI/2;
+        floor.position.set(rr.cx, y + 0.002, rr.cz);
+        g.add(floor);
+        const edge = new THREE.LineSegments(
+          new THREE.EdgesGeometry(new THREE.PlaneGeometry(rr.w, rr.d)),
+          new THREE.LineBasicMaterial({ color:hx(C.floorEdge) })
+        );
+        edge.rotation.x = -Math.PI/2;
+        edge.position.set(rr.cx, y + 0.003, rr.cz);
+        g.add(edge);
+        if (r.label) {
+          const spr = makeLabel(r.label);
+          spr.position.set(rr.cx, y + 0.9, rr.cz);
+          g.add(spr);
+        }
+      });
+
+      const wallMat = new THREE.MeshStandardMaterial({ color:hx(C.wall), roughness:1, transparent:true, opacity:0.55 });
+      p.walls.forEach((wall) => {
+        const rr = gridRect(wall);
+        // Degenerate axes get a hairline minimum so thin walls still read.
+        const m = new THREE.Mesh(
+          new THREE.BoxGeometry(Math.max(rr.w, 0.06), WALL_STUB_H, Math.max(rr.d, 0.06)),
+          wallMat
+        );
+        m.position.set(rr.cx, y + WALL_STUB_H / 2, rr.cz);
+        g.add(m);
+      });
+      return g;
+    }
+
+    const floor0 = plan ? buildFloorFromPlan(0, plan) : buildFloor(0, 0);
+    const floor1 = buildFloor(FLOOR_H, 1); // generic until a 2nd-floor OBJ exists
     scene.add(floor0, floor1);
 
     const markerMeshes = [];
@@ -310,7 +384,7 @@ function ThreeScene({ sensors, liveStateRef, armedRef, selectedRef, editRef, flo
       renderer.dispose();
       if (renderer.domElement.parentNode) mount.removeChild(renderer.domElement);
     };
-  }, [floorView, narrow, sensors, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved]);
+  }, [floorView, narrow, sensors, plan, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved]);
 
   return <div ref={mountRef} style={{ width:"100%", height:"100%" }} />;
 }
@@ -326,19 +400,6 @@ function ThreeScene({ sensors, liveStateRef, armedRef, selectedRef, editRef, flo
 // sensor_placements. Ground-floor placements only (floor 0); the plan
 // is the first floor.
 // ------------------------------------------------------------------
-const PLAN_URL = "/floorplans/first_floor.svg";
-// The plan's SVG viewBox (from the converter): 0..1000 x 0..885.5
-const PLAN_W = 1000, PLAN_H = 885.5;
-
-// placement coords live in the isometric grid space (-4..4 x, -3.75..3.75 y).
-// Map that onto the plan's pixel space for display, and invert on drag.
-function planFromGrid(x, y) {
-  return { px: ((x + 4) / 8) * PLAN_W, py: ((y + 3.75) / 7.5) * PLAN_H };
-}
-function gridFromPlan(px, py) {
-  return { x: (px / PLAN_W) * 8 - 4, y: (py / PLAN_H) * 7.5 - 3.75 };
-}
-
 function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt }) {
   const svgRef = useRef();
   const dragging = useRef(null);
@@ -458,6 +519,18 @@ export default function SecurityBoard() {
         if (!cancelled) setPlacements([]); // offline: empty, tray will populate from entities
       }
     })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // load the ground-floor 3D geometry (static asset from the Sweet Home 3D
+  // pipeline). null -> ThreeScene falls back to the generic demo geometry.
+  const [plan, setPlan] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(PLAN_JSON_URL)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => { if (!cancelled && p?.walls && p?.rooms && p?.viewbox) setPlan(p); })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -722,7 +795,7 @@ export default function SecurityBoard() {
     />
   ) : (
     <ThreeScene
-      sensors={sensors}
+      sensors={sensors} plan={plan}
       liveStateRef={liveStateRef} armedRef={armedRef} selectedRef={selectedRef} editRef={editRef}
       floorView={floorView} onPick={setSelected} onMoved={onMoved} narrow={narrow}
     />

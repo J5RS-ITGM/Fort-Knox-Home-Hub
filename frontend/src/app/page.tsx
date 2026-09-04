@@ -52,7 +52,7 @@ function stateLabel(e: Entity): string {
 
 function Lamp({ on, alert }: { on: boolean; alert?: boolean }) {
   const color = alert ? "bg-alert" : on ? "bg-ok" : "bg-line";
-  return <span className={`inline-block size-2 rounded-full ${color} ${on && !alert ? "lamp-live" : ""}`} />;
+  return <span className={`inline-block size-2 shrink-0 rounded-full ${color} ${on && !alert ? "lamp-live" : ""}`} />;
 }
 
 function StatusRail({ linkUp, bridgeUp, alarm, isAdmin }: { linkUp: boolean; bridgeUp: boolean; alarm?: Entity; isAdmin: boolean }) {
@@ -115,14 +115,17 @@ function EntityCard({ e }: { e: Entity }) {
 
   const body = (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-medium">{e.friendly_name}</span>
+      {/* Full names, never truncated: the entity_id is what gets typed
+          into HA during pairing/automation work, so it must be readable
+          end to end. Long values wrap instead of ellipsizing. */}
+      <div className="flex items-start justify-between gap-2">
+        <span className="break-words text-sm font-medium">{e.friendly_name}</span>
         <Lamp on={on || attention} alert={attention} />
       </div>
       <div className={`mt-1 text-lg font-semibold ${attention ? "text-alert" : "text-ink"}`}>{stateLabel(e)}</div>
-      <div className="mt-2 flex items-center justify-between font-[family-name:var(--font-mono)] text-[10px] text-ink-muted">
-        <span className="truncate">{e.entity_id}</span>
-        <span>
+      <div className="mt-2 flex items-start justify-between gap-2 font-[family-name:var(--font-mono)] text-[10px] text-ink-muted">
+        <span className="break-all">{e.entity_id}</span>
+        <span className="shrink-0">
           {battery != null && `${battery}%`}
           {power != null && ` ${power}W`}
         </span>
