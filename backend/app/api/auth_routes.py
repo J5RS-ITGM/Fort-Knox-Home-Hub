@@ -12,7 +12,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -706,7 +706,7 @@ async def ai_gemini_models(db: AsyncSession = Depends(get_session)) -> dict:
 async def schedule_extract(
     request: Request,
     file: UploadFile,
-    pin: str | None = None,
+    pin: str | None = Form(default=None),
     user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> dict:

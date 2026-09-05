@@ -207,12 +207,12 @@ export default function AlarmControl({
 function ArmTypePrompt({ onPick, onCancel }: { onPick: (m: ArmMode) => void; onCancel: () => void }) {
   return (
     <div
-      style={{ position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center",
-               background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)" }}
+      style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center",
+               overflowY: "auto", padding: 16, background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)" }}
       onClick={onCancel}
     >
       <div onClick={(e) => e.stopPropagation()}
-           style={{ width: 320, padding: 22, borderRadius: 18, background: C.field, border: `1px solid ${C.line}`,
+           style={{ width: "100%", maxWidth: 320, padding: 22, borderRadius: 18, background: C.field, border: `1px solid ${C.line}`,
                     display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ textAlign: "center", fontSize: 17, fontWeight: 600, color: C.ink }}>Arm system</div>
         <div style={{ textAlign: "center", fontSize: 12, color: C.sub, marginTop: -6 }}>Choose a mode</div>
@@ -269,15 +269,15 @@ function PinPad({
   return (
     <div
       style={{
-        position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center",
-        background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)",
+        position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center",
+        overflowY: "auto", padding: 16, background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)",
       }}
       onClick={onCancel}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: 320, padding: 24, borderRadius: 20,
+          width: "100%", maxWidth: 320, padding: 24, borderRadius: 20,
           background: C.field, border: `1px solid ${C.line}`,
           display: "flex", flexDirection: "column", gap: 14,
         }}

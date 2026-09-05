@@ -56,10 +56,25 @@ export default function CalendarPage() {
     const file = files?.[0] ?? pendingImage.current;
     if (!file) return;
     pendingImage.current = file;
-    setExtracting(true); setSyncMsg("Reading schedule…");
-    const body = new FormData(); body.append("file", file);
-    const url = pin ? `/api/google/schedule/extract?pin=${encodeURIComponent(pin)}` : "/api/google/schedule/extract";
-    const r = await fetch(`${API_URL}${url}`, { method: "POST", credentials: "include", body });
+    setExtracting(true);
+    setSyncMsg("Reading schedule… this can take up to a minute.");
+    const body = new FormData();
+    body.append("file", file);
+    if (pin) body.append("pin", pin); // in the body, never the URL
+    // guard against a hung request so the UI can't spin forever
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 90000);
+    let r: Response;
+    try {
+      r = await fetch(`${API_URL}/api/google/schedule/extract`, { method: "POST", credentials: "include", body, signal: ctrl.signal });
+    } catch (err) {
+      window.clearTimeout(timer);
+      setExtracting(false);
+      setSyncMsg((err as Error)?.name === "AbortError" ? "Timed out reading the photo — try a smaller or clearer image." : "Network error — try again.");
+      window.setTimeout(() => setSyncMsg(""), 6000);
+      return;
+    }
+    window.clearTimeout(timer);
     setExtracting(false);
     if (r.ok) {
       const d = await r.json();
@@ -77,10 +92,13 @@ export default function CalendarPage() {
     } else if (r.status === 409) {
       const d = await r.json().catch(() => null);
       setSyncMsg(d?.detail ?? "No Gemini key set (Admin → Settings).");
+      setPinPrompt(false); pendingImage.current = null;
     } else {
-      setSyncMsg("Could not read the schedule.");
+      const d = await r.json().catch(() => null);
+      setSyncMsg(d?.detail ?? "Could not read the schedule.");
+      setPinPrompt(false); pendingImage.current = null;
     }
-    window.setTimeout(() => setSyncMsg(""), 6000);
+    window.setTimeout(() => setSyncMsg(""), 7000);
   };
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -585,29 +603,39 @@ function SyncPinPrompt({ title, subtitle, confirmLabel, busy, error, onSubmit, o
   const press = (d: string) => setPin((p) => (p.length < 8 ? p + d : p));
   const key = (label: string, onClick: () => void) => (
     <button key={label} onClick={onClick} disabled={busy}
-      className="rounded-xl border border-line bg-panel-raised py-4 text-xl font-bold">{label}</button>
+      className="rounded-xl border border-line bg-panel-raised py-4 text-2xl font-bold active:scale-95 disabled:opacity-40">{label}</button>
   );
   return (
-    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/80 p-4 backdrop-blur" onClick={onClose}>
-      <div className="w-72 rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur"
+         onClick={busy ? undefined : onClose}>
+      <div className="my-auto w-full max-w-[300px] rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 text-center text-base font-semibold text-lamp">{title}</div>
         <p className="mb-3 text-center text-xs text-ink-muted">{subtitle}</p>
-        <div className="mb-2 flex justify-center gap-2" style={{ minHeight: 14 }}>
-          {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
-            <span key={i} className="size-3 rounded-full" style={{ background: i < pin.length ? "var(--color-lamp)" : "transparent", border: `1.5px solid ${i < pin.length ? "var(--color-lamp)" : "var(--color-line)"}` }} />
-          ))}
-        </div>
-        <div className="mb-3 min-h-4 text-center text-xs font-semibold text-alert">{error}</div>
-        <div className="grid grid-cols-3 gap-2">
-          {["1","2","3","4","5","6","7","8","9"].map((d) => key(d, () => press(d)))}
-          {key("⌫", () => setPin((p) => p.slice(0, -1)))}
-          {key("0", () => press("0"))}
-          {key("✕", onClose)}
-        </div>
-        <button onClick={() => onSubmit(pin)} disabled={busy || pin.length < 4}
-          className="mt-3 w-full rounded-xl border border-lamp/60 bg-lamp/10 py-3 text-sm font-semibold text-lamp disabled:opacity-40">
-          {busy ? "Checking…" : confirmLabel}
-        </button>
+        {busy ? (
+          <div className="flex flex-col items-center gap-3 py-8">
+            <div className="size-8 animate-spin rounded-full border-2 border-line border-t-lamp" />
+            <div className="text-center text-xs text-ink-muted">{confirmLabel === "Read schedule" ? "Reading your schedule… up to a minute." : "Working…"}</div>
+          </div>
+        ) : (
+          <>
+            <div className="mb-2 flex justify-center gap-2" style={{ minHeight: 16 }}>
+              {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
+                <span key={i} className="size-3.5 rounded-full" style={{ background: i < pin.length ? "var(--color-lamp)" : "transparent", border: `2px solid ${i < pin.length ? "var(--color-lamp)" : "var(--color-line)"}` }} />
+              ))}
+            </div>
+            <div className="mb-3 min-h-4 text-center text-xs font-semibold text-alert">{error}</div>
+            <div className="grid grid-cols-3 gap-2.5">
+              {["1","2","3","4","5","6","7","8","9"].map((d) => key(d, () => press(d)))}
+              {key("⌫", () => setPin((p) => p.slice(0, -1)))}
+              {key("0", () => press("0"))}
+              {key("✕", onClose)}
+            </div>
+            <button onClick={() => onSubmit(pin)} disabled={pin.length < 4}
+              className="mt-3 w-full rounded-xl border border-lamp/60 bg-lamp/10 py-3.5 text-sm font-semibold text-lamp disabled:opacity-40">
+              {confirmLabel}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
