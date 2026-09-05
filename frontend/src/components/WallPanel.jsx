@@ -24,7 +24,7 @@ import { useHomeHub } from "@/lib/useHomeHub";
  * their modules land (NWS/RainViewer, calendar, Chore Quest API).
  * ------------------------------------------------------------------ */
 
-const C = {
+let C = {
   secure:"#3fb98f", open:"#e0483d", motion:"#f0a838", amber:"#d9a441", offline:"#7a7f8a",
   accent:"#6b8afd", accent2:"#8b6bfd",
   bg0:"#0c0e13", bg1:"#12151f", card:"#171b27", cardHi:"#1f2432",
@@ -161,7 +161,7 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView }) 
     function onResize(){ W=mount.clientWidth||W; H=mount.clientHeight||H; const a=W/H; cam.left=-d*a; cam.right=d*a; cam.top=d; cam.bottom=-d; cam.updateProjectionMatrix(); renderer.setSize(W,H); }
     const ro=new ResizeObserver(onResize); ro.observe(mount);
     return ()=>{ cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); if(renderer.domElement.parentNode) mount.removeChild(renderer.domElement); };
-  }, [floorView, plan, placements, labels, liveStateRef, armedRef]);
+  }, [floorView, plan, placements, labels, liveStateRef, armedRef, themeTick]);
   return <div ref={mountRef} style={{ width:"100%", height:"100%" }} />;
 }
 
@@ -420,6 +420,15 @@ function Tile({ title, children, edit, onToggleVisible, style }) {
 }
 
 export default function WallPanel() {
+  // Re-theme the WebGL palette when the theme changes (event from useTheme).
+  const [themeTick, setThemeTick] = useState(0);
+  useEffect(() => {
+    const apply = () => { C = { ...C, ...webglSurfaces() }; setThemeTick((t) => t + 1); };
+    apply();
+    window.addEventListener("hh-theme", apply);
+    return () => window.removeEventListener("hh-theme", apply);
+  }, []);
+
   // ---- LIVE DATA -----------------------------------------------------------
   const { entities, linkUp, bridgeUp } = useHomeHub();
 

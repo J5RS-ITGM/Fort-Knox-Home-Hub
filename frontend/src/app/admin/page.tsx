@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 import { api, API_URL, AuditRow, Entity, User } from "@/lib/api";
+import { applyTheme, ThemeName } from "@/lib/theme";
 
 interface AllowRule { id: string; domain: string; service: string; note: string }
 interface Family { id: string; name: string; emoji: string; color: string; sort: number; user_id: string | null }
@@ -400,7 +401,7 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
       return out;
     } catch { return {}; }
   };
-  const [form, setForm] = useState(settings);
+  const [form, setForm] = useState<Record<string, string>>(settings);
   useEffect(() => setForm(settings), [settings]);
   const fields: [string, string, string][] = [
     ["home_name", "Home name", "Fort Knox"],
@@ -446,6 +447,36 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </label>
         </div>
         <p className="text-[11px] text-ink-muted">Armed alerts always stay until acknowledged. Changes reach open panels within a minute.</p>
+
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Appearance</h3>
+        <div className="flex flex-col gap-2">
+          <span className="text-xs text-ink-muted">Theme</span>
+          <div className="flex gap-2">
+            {(["light", "moderate", "dark"] as const).map((t) => (
+              <button key={t}
+                onClick={() => { setForm({ ...form, theme_mode: t }); applyTheme(t, form.theme_accent || null); }}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm capitalize transition-colors ${
+                  (form.theme_mode || "dark") === t ? "border-lamp/70 text-ink" : "border-line text-ink-muted hover:text-ink"
+                }`}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-end gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-ink-muted">Accent color</span>
+            <input type="color" className="h-9 w-16 cursor-pointer rounded border border-line bg-panel"
+              value={form.theme_accent || "#e8a33d"}
+              onChange={(e) => { setForm({ ...form, theme_accent: e.target.value }); applyTheme((form.theme_mode as ThemeName) || "dark", e.target.value); }} />
+          </label>
+          <button
+            onClick={() => { setForm({ ...form, theme_accent: "" }); applyTheme((form.theme_mode as ThemeName) || "dark", null); }}
+            className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink">
+            Reset to theme default
+          </button>
+        </div>
+        <p className="text-[11px] text-ink-muted">Preview applies live on this device; Save settings pushes it to every panel.</p>
 
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Per-sensor alert rules</h3>
         <p className="-mt-1 text-[11px] text-ink-muted">
@@ -493,7 +524,7 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           onClick={() => {
             // send ONLY known editable fields — never echo back whatever the
             // GET returned (defense in depth against key leakage)
-            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules"];
+            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules", "theme_mode", "theme_accent"];
             const values = Object.fromEntries(keys.map((key) => [key, form[key] ?? ""]));
             act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values }) }));
           }}>

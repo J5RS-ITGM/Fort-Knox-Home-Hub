@@ -368,6 +368,8 @@ SETTING_KEYS = {
     # per-sensor overrides: JSON {entity_id: "all"|"armed_only"|"off"};
     # entities absent from the map follow alerts_mode
     "alert_rules",
+    # appearance: theme preset (light|moderate|dark) + optional accent hex
+    "theme_mode", "theme_accent",
 }
 
 

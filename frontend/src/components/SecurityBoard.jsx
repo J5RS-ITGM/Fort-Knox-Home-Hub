@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { API_URL, callService } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
+import { webglSurfaces } from "@/lib/theme";
 import {
   PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
   planFromGrid, gridFromPlan, gridRect,
@@ -26,7 +27,7 @@ import {
  *     missing, the generic demo geometry renders as a fallback.
  * ------------------------------------------------------------------ */
 
-const C = {
+let C = {
   secure:"#3fb98f", open:"#e0483d", motion:"#f0a838", offline:"#7a7f8a",
   lowbat:"#d9a441", floor:"#20242e", floorEdge:"#2c3140", wall:"#2a2f3b",
   bg0:"#0f1116", bg1:"#161922", text:"#e8ebf2", sub:"#8a91a0", accent:"#6b8afd",
@@ -465,7 +466,7 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
       renderer.dispose();
       if (renderer.domElement.parentNode) mount.removeChild(renderer.domElement);
     };
-  }, [floorView, narrow, sensors, plan, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView]);
+  }, [floorView, narrow, sensors, plan, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView, themeTick]);
 
   const zbtn = {
     width: 40, height: 40, display: "grid", placeItems: "center",
@@ -593,6 +594,14 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
 }
 
 export default function SecurityBoard() {
+  const [themeTick, setThemeTick] = useState(0);
+  useEffect(() => {
+    const apply = () => { C = { ...C, ...webglSurfaces() }; setThemeTick((t) => t + 1); };
+    apply();
+    window.addEventListener("hh-theme", apply);
+    return () => window.removeEventListener("hh-theme", apply);
+  }, []);
+
   const { entities, linkUp, bridgeUp } = useHomeHub();
   const [viewMode, setViewMode] = useState("iso"); // "iso" | "plan"
   const [placements, setPlacements] = useState(null); // null = loading

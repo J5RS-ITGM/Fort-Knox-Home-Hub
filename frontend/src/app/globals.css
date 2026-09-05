@@ -1,18 +1,76 @@
 @import "tailwindcss";
 
-/* HomeHub design tokens — dark control-room panel.
-   Deep blue-slate field, hairline dividers, a single amber "indicator lamp"
-   accent, green/red reserved strictly for ok/alert semantics. */
-@theme {
-  --color-field: #0c1117;
-  --color-panel: #141b24;
-  --color-panel-raised: #1a2330;
-  --color-line: #243040;
-  --color-ink: #e8edf2;
-  --color-ink-muted: #7e8c9c;
-  --color-lamp: #e8a33d; /* accent: amber indicator */
-  --color-ok: #4caf7d;
-  --color-alert: #e05252;
+/* HomeHub design tokens — now runtime-themeable.
+   Presets (Light / Moderate / Dark) set the palette on :root via
+   [data-theme]; an optional accent override sets --accent-user. The
+   Tailwind @theme tokens below POINT AT these vars, so every utility
+   (bg-field, text-ink, border-line…) re-colors live when the theme
+   changes. The WebGL surfaces (WallPanel, SecurityBoard) read the same
+   values through lib/theme.ts so 3D matches 2D. */
+
+:root,
+:root[data-theme="dark"] {
+  --hh-field: #0c1117;
+  --hh-panel: #141b24;
+  --hh-panel-raised: #1a2330;
+  --hh-line: #243040;
+  --hh-ink: #e8edf2;
+  --hh-ink-muted: #7e8c9c;
+  --hh-accent: #e8a33d;
+  --hh-ok: #4caf7d;
+  --hh-alert: #e05252;
+}
+
+/* Moderate — dim slate-gray, easier than full dark, still low-glare */
+:root[data-theme="moderate"] {
+  --hh-field: #1e242c;
+  --hh-panel: #272e38;
+  --hh-panel-raised: #313a46;
+  --hh-line: #3d4653;
+  --hh-ink: #eef1f5;
+  --hh-ink-muted: #99a3b0;
+  --hh-accent: #e8a33d;
+  --hh-ok: #4caf7d;
+  --hh-alert: #e0574d;
+}
+
+/* Light — bright surfaces for daytime wall panels */
+:root[data-theme="light"] {
+  --hh-field: #eef1f5;
+  --hh-panel: #ffffff;
+  --hh-panel-raised: #f6f8fb;
+  --hh-line: #d3dae3;
+  --hh-ink: #1a2230;
+  --hh-ink-muted: #5a6675;
+  --hh-accent: #c07d16;
+  --hh-ok: #2e8b57;
+  --hh-alert: #c73a3a;
+}
+
+/* Accent override (Admin → Settings color picker). When set, wins over the
+   preset accent. Falls back to the preset value when unset. */
+:root {
+  --color-field: var(--hh-field);
+  --color-panel: var(--hh-panel);
+  --color-panel-raised: var(--hh-panel-raised);
+  --color-line: var(--hh-line);
+  --color-ink: var(--hh-ink);
+  --color-ink-muted: var(--hh-ink-muted);
+  --color-lamp: var(--accent-user, var(--hh-accent));
+  --color-ok: var(--hh-ok);
+  --color-alert: var(--hh-alert);
+}
+
+@theme inline {
+  --color-field: var(--color-field);
+  --color-panel: var(--color-panel);
+  --color-panel-raised: var(--color-panel-raised);
+  --color-line: var(--color-line);
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-lamp: var(--color-lamp);
+  --color-ok: var(--color-ok);
+  --color-alert: var(--color-alert);
 
   --font-display: "Avenir Next", "Futura", "Segoe UI", system-ui, sans-serif;
   --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -23,6 +81,7 @@ html {
   background: var(--color-field);
   color: var(--color-ink);
   font-family: var(--font-body);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {

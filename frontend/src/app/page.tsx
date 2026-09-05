@@ -9,6 +9,8 @@
 import { useMemo, useState } from "react";
 import { callService, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
+import AppHeader from "@/components/AppHeader";
+import { Lamp } from "@/components/Lamp";
 import AlarmControl from "@/components/AlarmControl";
 import { logout, useMe } from "@/lib/auth";
 import AuthGate from "@/components/AuthGate";
@@ -69,54 +71,7 @@ function stateLabel(e: Entity): string {
 
 // ---------- small components -------------------------------------------------
 
-function Lamp({ on, alert }: { on: boolean; alert?: boolean }) {
-  const color = alert ? "bg-alert" : on ? "bg-ok" : "bg-line";
-  return <span className={`inline-block size-2 shrink-0 rounded-full ${color} ${on && !alert ? "lamp-live" : ""}`} />;
-}
 
-function StatusRail({ linkUp, bridgeUp, alarm, isAdmin, isKiosk }: { linkUp: boolean; bridgeUp: boolean; alarm?: Entity; isAdmin: boolean; isKiosk: boolean }) {
-  return (
-    <header className="sticky top-0 z-10 border-b border-line bg-field/90 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
-        <h1 className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-wide">
-          Home<span className="text-lamp">Hub</span>
-        </h1>
-        <nav className="flex items-center gap-2">
-          <a href="/chores" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
-            Chores
-          </a>
-          <a href="/calendar" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
-            Calendar
-          </a>
-          <a href="/gallery" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
-            Gallery
-          </a>
-          <a href="/panel" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
-            Wall panel
-          </a>
-          <a href="/security" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
-            Security board
-          </a>
-          {isAdmin && (
-            <a href="/admin" className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
-              Admin
-            </a>
-          )}
-          {!isKiosk && (
-            <button onClick={() => logout()} className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-alert/50 hover:text-ink">
-              Sign out
-            </button>
-          )}
-        </nav>
-        <div className="flex items-center gap-4 text-xs text-ink-muted">
-          <span className="flex items-center gap-1.5"><Lamp on={linkUp} alert={!linkUp} /> App link</span>
-          <span className="flex items-center gap-1.5"><Lamp on={bridgeUp} alert={!bridgeUp} /> HA bridge</span>
-        </div>
-        {alarm && <div className="ml-auto"><AlarmControl /></div>}
-      </div>
-    </header>
-  );
-}
 
 function EntityCard({ e }: { e: Entity }) {
   const [busy, setBusy] = useState(false);
@@ -199,7 +154,7 @@ function DashboardInner() {
 
   return (
     <div className="min-h-dvh">
-      <StatusRail linkUp={linkUp} bridgeUp={bridgeUp} alarm={alarm} isAdmin={me?.role === "admin"} isKiosk={me?.role === "kiosk"} />
+      <AppHeader />
 
       <main className="mx-auto max-w-5xl px-4 py-6">
         {!linkUp && (

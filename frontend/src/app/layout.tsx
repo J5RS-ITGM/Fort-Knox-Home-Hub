@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import SWRegister from "@/components/SWRegister";
 import SensorFlash from "@/components/SensorFlash";
+import ThemeProvider from "@/components/ThemeProvider";
+import { themeBootScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "HomeHub",
@@ -19,7 +21,12 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        {/* set theme before first paint to avoid a flash of the wrong theme */}
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body className="bg-field text-ink antialiased">
+        <ThemeProvider />
         <SWRegister />
         <SensorFlash />
         {children}
