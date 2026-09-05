@@ -22,6 +22,7 @@ export interface User {
   role: "admin" | "member" | "kiosk";
   disabled: boolean;
   pin_set: boolean;
+  kiosk: boolean;       // this SESSION is in kiosk mode
   created_at: string;
 }
 

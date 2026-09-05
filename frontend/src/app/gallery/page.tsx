@@ -7,13 +7,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { api, API_URL } from "@/lib/api";
-import { useMe } from "@/lib/auth";
+import { useMe , isKiosk } from "@/lib/auth";
 
 interface Photo { id: string; original: string; uploaded_by: string; created_at: string; }
 
 export default function GalleryPage() {
   const { me } = useMe();
-  const canDelete = me?.role !== "kiosk";
+  const canDelete = !isKiosk(me);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [uploading, setUploading] = useState(0); // count in flight
   const [view, setView] = useState<Photo | null>(null);

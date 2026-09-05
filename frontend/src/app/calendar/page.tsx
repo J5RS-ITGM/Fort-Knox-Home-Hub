@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { api } from "@/lib/api";
-import { useMe } from "@/lib/auth";
+import { useMe , isKiosk } from "@/lib/auth";
 
 interface Member { id: string; name: string; emoji: string; color: string; }
 interface Ev { id: string; title: string; date: string; time: string | null; member_id: string | null; notes: string; }
@@ -16,7 +16,7 @@ const dstr = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function CalendarPage() {
   const { me } = useMe();
-  const canDelete = me?.role !== "kiosk";
+  const canDelete = !isKiosk(me);
   const [anchor, setAnchor] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
   const [members, setMembers] = useState<Member[]>([]);
   const [events, setEvents] = useState<Ev[]>([]);

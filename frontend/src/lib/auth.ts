@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, User } from "./api";
+import { api, API_URL, User } from "./api";
 
 export async function fetchMe(): Promise<User | null> {
   try {
@@ -40,4 +40,26 @@ export function useMe(): { me: User | null; loading: boolean } {
     fetchMe().then((u) => { setMe(u); setLoading(false); });
   }, []);
   return { me, loading };
+}
+
+
+/** True when the current session is in kiosk mode (or the legacy kiosk
+ *  role). Kiosk = family screens + bottom tabs, no admin/dashboard/deletes. */
+export function isKiosk(me: User | null | undefined): boolean {
+  return !!me && (me.kiosk || me.role === "kiosk");
+}
+
+/** Enter/exit kiosk mode with the kiosk password. Resolves to an error
+ *  string (empty = success). Reloads on success so every component's
+ *  `me` picks up the new mode. */
+export async function toggleKiosk(on: boolean, password: string): Promise<string> {
+  const res = await fetch(`${API_URL}/api/kiosk/${on ? "enter" : "exit"}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (res.ok) { window.location.href = on ? "/panel" : "/"; return ""; }
+  const body = await res.json().catch(() => null);
+  return String(body?.detail ?? `Failed (${res.status})`);
 }

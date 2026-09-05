@@ -117,7 +117,6 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
                             onChange={(e) => patch(u.id, { role: e.target.value })}>
                       <option value="member">member</option>
                       <option value="admin">admin</option>
-                      <option value="kiosk">kiosk (wall panel)</option>
                     </select>
                     <button disabled={busy} className={btn} onClick={() => patch(u.id, { disabled: !u.disabled })}>
                       {u.disabled ? "Enable" : "Disable"}
@@ -152,7 +151,7 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
         <input className={input} placeholder="Display name" value={nu.display_name} onChange={(e) => setNu({ ...nu, display_name: e.target.value })} />
         <input className={input} type="password" placeholder="Password (10+)" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
         <select className={input} value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
-          <option value="member">member</option><option value="admin">admin</option><option value="kiosk">kiosk (wall panel)</option>
+          <option value="member">member</option><option value="admin">admin</option>
         </select>
         <button disabled={busy || !nu.username || !nu.password} className={primary}
           onClick={() => act(() => api("/api/admin/users", { method: "POST", body: JSON.stringify(nu) })).then((ok) => ok && setNu({ username: "", password: "", display_name: "", role: "member" }))}>
@@ -402,6 +401,11 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
     } catch { return {}; }
   };
   const [form, setForm] = useState<Record<string, string>>(settings);
+  const [kioskPw, setKioskPw] = useState("");
+  const [kioskSet, setKioskSet] = useState(false);
+  useEffect(() => {
+    api("/api/admin/kiosk-password").then((r) => (r.ok ? r.json() : { set: false })).then((d) => setKioskSet(!!d.set)).catch(() => {});
+  }, []);
   useEffect(() => setForm(settings), [settings]);
   const fields: [string, string, string][] = [
     ["home_name", "Home name", "Fort Knox"],
@@ -447,6 +451,22 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </label>
         </div>
         <p className="text-[11px] text-ink-muted">Armed alerts always stay until acknowledged. Changes reach open panels within a minute.</p>
+
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Kiosk mode</h3>
+        <p className="-mt-1 text-[11px] text-ink-muted">
+          Any signed-in screen can enter kiosk mode (family views only, big bottom tabs, no admin or deletes) with this
+          password, and exit with the same one. Set it once here; it&apos;s stored hashed and never shown.
+        </p>
+        <div className="flex items-center gap-2">
+          <input type="password" className={`${input} w-56`} placeholder={kioskSet ? "Change kiosk password" : "Set kiosk password"}
+                 value={kioskPw} onChange={(e) => setKioskPw(e.target.value)} autoComplete="new-password" />
+          <button disabled={busy || kioskPw.length < 4} className={btn}
+                  onClick={() => act(() => api("/api/admin/kiosk-password", { method: "PUT", body: JSON.stringify({ password: kioskPw }) }))
+                    .then((ok) => { if (ok) { setKioskPw(""); setKioskSet(true); } })}>
+            Save
+          </button>
+          <span className="text-[11px] text-ink-muted">{kioskSet ? "Password set" : "Not set yet"}</span>
+        </div>
 
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Appearance</h3>
         <div className="flex flex-col gap-2">

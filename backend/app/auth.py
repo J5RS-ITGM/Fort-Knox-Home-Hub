@@ -71,6 +71,8 @@ async def resolve_session(db: AsyncSession, token: str | None) -> models.User | 
     user = await db.get(models.User, row.user_id)
     if user is None or user.disabled:
         return None
+    # carry the session's kiosk-mode flag on the user object for guards
+    user.kiosk = bool(row.kiosk) or user.role == "kiosk"
     return user
 
 
@@ -115,6 +117,8 @@ async def get_current_user(
 async def require_admin(user: models.User = Depends(get_current_user)) -> models.User:
     if user.role != "admin":
         raise HTTPException(403, "admin only")
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to use admin features")
     return user
 
 

@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401 — register models with Base.metadata
 from . import allowlist
-from .api.auth_routes import admin_router, auth_router
+from .api.auth_routes import admin_router, auth_router, kiosk_router
 from .api.family_routes import router as family_router
 from .api.routes import protected as protected_router
 from .api.routes import router as api_router
@@ -42,6 +42,10 @@ async def lifespan(app: FastAPI):
                 if "pin_hash" not in cols:
                     sync_conn.execute(text("ALTER TABLE users ADD COLUMN pin_hash VARCHAR(128)"))
                     log.info("Added users.pin_hash column")
+                scols = {c["name"] for c in inspect(sync_conn).get_columns("sessions")}
+                if "kiosk" not in scols:
+                    sync_conn.execute(text("ALTER TABLE sessions ADD COLUMN kiosk BOOLEAN NOT NULL DEFAULT FALSE"))
+                    log.info("Added sessions.kiosk column")
             await conn.run_sync(_ensure_columns)
         log.info("Database tables ensured (%s)", settings.database_url.split("://")[0])
 
@@ -73,4 +77,5 @@ app.include_router(protected_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(family_router)
+app.include_router(kiosk_router)
 app.include_router(ws_router)

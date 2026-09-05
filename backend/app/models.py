@@ -39,6 +39,9 @@ class User(Base):
     def pin_set(self) -> bool:
         return self.pin_hash is not None
 
+    # Set per-request by auth.resolve_session from the session row.
+    kiosk: bool = False
+
     layouts: Mapped[list["PanelLayout"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -53,6 +56,10 @@ class Session(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Kiosk MODE is a property of the session, not the user: "Enter kiosk
+    # mode" (kiosk password) flips this on; "Exit" flips it off. While on,
+    # admin routes + destructive family actions are refused server-side.
+    kiosk: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
     user: Mapped[User] = relationship(back_populates="sessions")
 

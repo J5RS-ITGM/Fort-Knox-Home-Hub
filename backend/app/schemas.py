@@ -79,6 +79,7 @@ class UserOut(BaseModel):
     role: str
     disabled: bool
     pin_set: bool = False
+    kiosk: bool = False   # session is in kiosk mode (see /api/kiosk)
     created_at: datetime
 
 

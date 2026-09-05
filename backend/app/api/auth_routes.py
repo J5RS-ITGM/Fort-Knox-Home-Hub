@@ -411,3 +411,89 @@ async def put_settings(
     )
     return list(result.scalars())
 
+
+
+# ============================ Kiosk mode =====================================
+# Kiosk mode is a per-SESSION flag toggled with a dedicated kiosk password
+# (bcrypt hash in app_settings under KIOSK_PW_KEY — never in SETTING_KEYS,
+# so it is never returned by any settings endpoint). Enter → the session's
+# UI collapses to the family screens and the backend refuses admin routes
+# + destructive actions for that session. Exit → same password, back to
+# normal. Rate-limited like login.
+from ..auth import _hash_token  # noqa: E402
+from pydantic import BaseModel as _BM  # noqa: E402
+
+KIOSK_PW_KEY = "kiosk_password_hash"
+kiosk_router = APIRouter(prefix="/api/kiosk", tags=["kiosk"])
+
+
+class KioskPasswordIn(_BM):
+    password: str
+
+
+class KioskToggleIn(_BM):
+    password: str
+
+
+async def _kiosk_hash(db: AsyncSession) -> str | None:
+    row = await db.get(models.AppSetting, KIOSK_PW_KEY)
+    return row.value if row and row.value else None
+
+
+@admin_router.get("/kiosk-password")
+async def kiosk_password_status(db: AsyncSession = Depends(get_session)) -> dict:
+    return {"set": (await _kiosk_hash(db)) is not None}
+
+
+@admin_router.put("/kiosk-password")
+async def set_kiosk_password(
+    body: KioskPasswordIn,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    if len(body.password) < 4:
+        raise HTTPException(422, "kiosk password must be at least 4 characters")
+    await put_setting(db, KIOSK_PW_KEY, hash_password(body.password))
+    await db.commit()
+    await audit(db, admin.username, "kiosk_password_set", "")
+    return {"set": True}
+
+
+async def _toggle_kiosk(request: Request, body: KioskToggleIn, user: models.User,
+                        db: AsyncSession, on: bool) -> dict:
+    ip = request.client.host if request.client else "?"
+    check_rate_limit(f"kiosk:{user.username}", ip)
+    stored = await _kiosk_hash(db)
+    if stored is None:
+        raise HTTPException(409, "no kiosk password set — set one in Admin → Settings")
+    if not verify_password(body.password, stored):
+        record_failure(f"kiosk:{user.username}", ip)
+        await audit(db, user.username, "kiosk_pw_fail", "enter" if on else "exit")
+        raise HTTPException(403, "wrong kiosk password")
+    clear_failures(f"kiosk:{user.username}", ip)
+    token = request.cookies.get(COOKIE_NAME)
+    row = await db.get(models.Session, _hash_token(token)) if token else None
+    if row is None:
+        raise HTTPException(401, "not authenticated")
+    row.kiosk = on
+    await db.commit()
+    await audit(db, user.username, "kiosk_enter" if on else "kiosk_exit", "")
+    return {"kiosk": on}
+
+
+@kiosk_router.post("/enter")
+async def kiosk_enter(
+    body: KioskToggleIn, request: Request,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    return await _toggle_kiosk(request, body, user, db, True)
+
+
+@kiosk_router.post("/exit")
+async def kiosk_exit(
+    body: KioskToggleIn, request: Request,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    return await _toggle_kiosk(request, body, user, db, False)

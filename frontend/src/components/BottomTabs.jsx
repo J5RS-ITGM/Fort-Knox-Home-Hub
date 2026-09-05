@@ -5,9 +5,11 @@
  *  shared by the wall panel and the family module pages so every screen
  *  can reach every function without hunting for header links. */
 
+import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { CalendarDays, Home, Images, LayoutGrid, ListChecks, Shield } from "lucide-react";
-import { useMe } from "@/lib/auth";
+import { CalendarDays, Home, Images, LayoutGrid, ListChecks, LockOpen, Shield } from "lucide-react";
+import KioskGate from "@/components/KioskGate";
+import { useMe , isKiosk } from "@/lib/auth";
 
 const TABS = [
   { href: "/panel", label: "Panel", Icon: LayoutGrid },
@@ -26,9 +28,10 @@ export default function BottomTabs() {
   // The bottom bar is the KIOSK navigation only. Browser/admin sessions
   // use the top AppHeader instead — showing both is redundant. Until we
   // know the role, render nothing (avoids a flash of the bar on desktop).
-  if (me?.role !== "kiosk") return null;
+  const [gate, setGate] = useState(false);
+  if (!isKiosk(me)) return null;
   const tabs = TABS.filter((t) => t.href !== "/"); // kiosk: no dashboard
-  return (
+  return (<>
     <nav
       aria-label="Panel navigation"
       style={{
@@ -62,6 +65,20 @@ export default function BottomTabs() {
           </a>
         );
       })}
+      <button
+        onClick={() => setGate(true)}
+        aria-label="Exit kiosk mode"
+        style={{
+          flex: 0.7, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: 3,
+          background: "transparent", border: "none", borderTop: "2px solid transparent",
+          color: "#5a616f", fontSize: 11, fontWeight: 700, cursor: "pointer", touchAction: "manipulation",
+        }}
+      >
+        <LockOpen size={20} />
+        Exit
+      </button>
     </nav>
-  );
+    {gate && <KioskGate mode="exit" onClose={() => setGate(false)} />}
+  </>);
 }

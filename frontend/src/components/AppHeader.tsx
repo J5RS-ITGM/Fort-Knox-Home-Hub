@@ -6,11 +6,13 @@
  *  the nav as one equal-width pill strip (flex:1 tabs, active tab filled).
  *  Kiosk sessions get a trimmed set (no Home, Admin, or Sign out). */
 
+import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, LogOut, Settings } from "lucide-react";
+import { LogOut, MonitorSmartphone, Settings } from "lucide-react";
+import KioskGate from "@/components/KioskGate";
 import AlarmControl from "@/components/AlarmControl";
 import { Lamp } from "@/components/Lamp";
-import { logout, useMe } from "@/lib/auth";
+import { logout, useMe , isKiosk } from "@/lib/auth";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 const NAV: [string, string][] = [
@@ -26,10 +28,11 @@ export default function AppHeader() {
   const pathname = usePathname();
   const { linkUp, bridgeUp } = useHomeHub();
   const { me, loading } = useMe();
+  const [gate, setGate] = useState(false);
 
   // Kiosk navigates via the bottom tab bar, not this header — both is
   // redundant. Hide until auth resolves to avoid a flash, skip for kiosk.
-  if (loading || me?.role === "kiosk") return null;
+  if (loading || isKiosk(me)) return null;
 
   const isAdmin = me?.role === "admin";
   const nav = NAV;
@@ -58,10 +61,15 @@ export default function AppHeader() {
               <Settings size={17} />
             </a>
           )}
+          <button onClick={() => setGate(true)} aria-label="Enter kiosk mode" title="Enter kiosk mode"
+                  className="grid size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink">
+            <MonitorSmartphone size={17} />
+          </button>
           <button onClick={() => logout()} aria-label="Sign out"
                   className="grid size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-alert/50 hover:text-ink">
             <LogOut size={17} />
           </button>
+          {gate && <KioskGate mode="enter" onClose={() => setGate(false)} />}
         </div>
 
         {/* Row 2 — equal-width nav strip */}
