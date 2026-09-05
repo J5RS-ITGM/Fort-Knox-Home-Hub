@@ -23,6 +23,7 @@ DEFAULTS: list[tuple[str, str, str]] = [
     ("alarm_control_panel", "alarm_disarm", ""),
     ("alarm_control_panel", "alarm_arm_home", ""),
     ("alarm_control_panel", "alarm_arm_away", ""),
+    ("alarm_control_panel", "alarm_arm_night", ""),
 ]
 
 _cache: set[tuple[str, str]] = set()
@@ -44,9 +45,13 @@ async def refresh(db: AsyncSession) -> None:
 
 async def ensure_seeded(db: AsyncSession) -> None:
     rows = (await db.execute(select(models.ServiceAllow))).scalars().all()
-    if not rows:
-        for domain, service, note in DEFAULTS:
+    existing = {(r.domain, r.service) for r in rows}
+    added = 0
+    for domain, service, note in DEFAULTS:
+        if (domain, service) not in existing:
             db.add(models.ServiceAllow(domain=domain, service=service, note=note))
+            added += 1
+    if added:
         await db.commit()
-        log.info("Service allowlist seeded with %d defaults", len(DEFAULTS))
+        log.info("Service allowlist: added %d new default service(s)", added)
     await refresh(db)

@@ -35,7 +35,7 @@ const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default function CalendarPage() {
   const { me } = useMe();
   const canEdit = !isKiosk(me);
-  const [view, setView] = useState<"month" | "week">("month");
+  const [view, setView] = useState<"month" | "week" | "lanes" | "agenda">("month");
   const [anchor, setAnchor] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [members, setMembers] = useState<Member[]>([]);
@@ -50,7 +50,12 @@ export default function CalendarPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [rangeStart, rangeEnd] = useMemo(() => {
-    if (view === "week") {
+    if (view === "agenda") {
+      const start = new Date(weekAnchor);
+      const end = new Date(weekAnchor); end.setDate(end.getDate() + 13);
+      return [dstr(start), dstr(end)];
+    }
+    if (view === "week" || view === "lanes") {
       const mon = new Date(weekAnchor); mon.setDate(weekAnchor.getDate() - ((weekAnchor.getDay() + 6) % 7));
       const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
       return [dstr(mon), dstr(sun)];
@@ -134,12 +139,29 @@ export default function CalendarPage() {
   }, [weekAnchor]);
 
   const today = dstr(new Date());
-  const title = view === "week"
+
+  // agenda: the next 14 days from weekAnchor, each with its events + label
+  const agendaDays = useMemo(() => {
+    const out: { ds: string; label: string; evs: Ev[] }[] = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(weekAnchor); d.setDate(d.getDate() + i);
+      const ds = dstr(d);
+      const evs = byDate.get(ds) ?? [];
+      if (i > 2 && evs.length === 0) continue; // skip empty far-out days, keep first 3
+      const rel = ds === today ? "Today · " : ds === dstr(new Date(new Date(today).getTime() + 86400000)) ? "Tomorrow · " : "";
+      out.push({ ds, label: rel + d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }), evs });
+    }
+    return out;
+  }, [weekAnchor, byDate, today]);
+  const title = (view === "week" || view === "lanes")
     ? `Week of ${weekDays[0].toLocaleDateString([], { month: "short", day: "numeric" })}`
+    : view === "agenda"
+    ? `${weekAnchor.toLocaleDateString([], { month: "short", day: "numeric" })} — next 2 weeks`
     : anchor.toLocaleDateString([], { month: "long", year: "numeric" });
 
   const step = (dir: number) => {
-    if (view === "week") { const d = new Date(weekAnchor); d.setDate(d.getDate() + dir * 7); setWeekAnchor(d); }
+    if (view === "agenda") { const d = new Date(weekAnchor); d.setDate(d.getDate() + dir * 14); setWeekAnchor(d); }
+    else if (view === "week" || view === "lanes") { const d = new Date(weekAnchor); d.setDate(d.getDate() + dir * 7); setWeekAnchor(d); }
     else setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + dir, 1));
   };
 
@@ -152,9 +174,9 @@ export default function CalendarPage() {
     <PageShell title="Family Calendar" active="/calendar" wide>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg border border-line p-0.5">
-          {(["month", "week"] as const).map((v) => (
+          {([["month","Month"],["week","Week"],["lanes","Lanes"],["agenda","Agenda"]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setView(v)}
-              className={`rounded-md px-3 py-1 text-xs font-medium capitalize ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{v}</button>
+              className={`rounded-md px-3 py-1 text-xs font-medium ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
           ))}
         </div>
         <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(-1)}>&larr;</button>
@@ -207,7 +229,7 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {view === "month" ? (
+      {view === "month" && (
         <div>
           <div className="mb-1 grid grid-cols-7 text-center text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
             {WD.map((d) => <div key={d} className="py-1">{d}</div>)}
@@ -241,7 +263,9 @@ export default function CalendarPage() {
             })}
           </div>
         </div>
-      ) : (
+      )}
+
+      {view === "week" && (
         <div className="grid grid-cols-7 gap-1">
           {weekDays.map((d) => {
             const ds = dstr(d);
@@ -269,6 +293,110 @@ export default function CalendarPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {view === "lanes" && (
+        <div className="overflow-x-auto">
+          <div className="min-w-[720px]">
+            <div className="grid border-b border-line text-[11px] uppercase text-ink-muted" style={{ gridTemplateColumns: "110px repeat(7, 1fr)" }}>
+              <span className="px-2 py-2" />
+              {weekDays.map((d) => (
+                <span key={dstr(d)} className={`px-1 py-2 text-center ${dstr(d) === today ? "text-lamp" : ""}`}>{WD[(d.getDay() + 6) % 7]} {d.getDate()}</span>
+              ))}
+            </div>
+            {members.map((m) => (
+              <div key={m.id} className="grid border-b border-line/60" style={{ gridTemplateColumns: "110px repeat(7, 1fr)" }}>
+                <div className="flex items-center gap-2 border-r border-line px-2 py-2">
+                  <span className="grid size-6 place-items-center rounded-full text-sm" style={{ background: `${m.color}33`, border: `2px solid ${m.color}` }}>{m.emoji}</span>
+                  <span className="truncate text-xs">{m.name}</span>
+                </div>
+                {weekDays.map((d) => {
+                  const ds = dstr(d);
+                  const evs = (byDate.get(ds) ?? []).filter((e) => e.member_id === m.id);
+                  return (
+                    <div key={ds} className="min-h-16 border-r border-line/40 p-1">
+                      {evs.map((e) => (
+                        <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
+                          className="mb-1 block w-full truncate rounded px-1.5 py-1 text-left text-[11px] font-medium text-white"
+                          style={{ background: dot(e) }}>
+                          {e.time && `${e.time} `}{e.title}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            {/* whole-family (unassigned) row */}
+            <div className="grid" style={{ gridTemplateColumns: "110px repeat(7, 1fr)" }}>
+              <div className="flex items-center gap-2 border-r border-line px-2 py-2 text-xs text-ink-muted">Everyone</div>
+              {weekDays.map((d) => {
+                const ds = dstr(d);
+                const evs = (byDate.get(ds) ?? []).filter((e) => !e.member_id);
+                return (
+                  <div key={ds} className="min-h-16 border-r border-line/40 p-1">
+                    {evs.map((e) => (
+                      <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
+                        className="mb-1 block w-full truncate rounded px-1.5 py-1 text-left text-[11px] font-medium"
+                        style={{ background: `${dot(e)}33`, color: "var(--color-ink)" }}>
+                        {e.time && `${e.time} `}{e.title}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === "agenda" && (
+        <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+          <div className="flex flex-col gap-4">
+            {agendaDays.map(({ ds, label, evs }) => (
+              <div key={ds}>
+                <div className={`mb-2 text-sm font-semibold ${ds === today ? "text-lamp" : ""}`}>{label}</div>
+                {evs.length === 0 ? (
+                  <div className="rounded-lg border border-line bg-panel px-3 py-2 text-xs text-ink-muted">Nothing scheduled.</div>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {evs.map((e) => (
+                      <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
+                        className="flex items-center gap-3 rounded-lg border-l-4 bg-panel px-3 py-2 text-left"
+                        style={{ borderColor: dot(e) }}>
+                        <span className="w-16 shrink-0 text-xs text-ink-muted">{e.time ?? "All day"}</span>
+                        {e.member_id && <span className="grid size-6 shrink-0 place-items-center rounded-full text-xs" style={{ background: `${dot(e)}33`, border: `1.5px solid ${dot(e)}` }}>{memberById.get(e.member_id)?.emoji}</span>}
+                        <span className="flex-1">
+                          <span className="block text-sm font-medium">{e.title}</span>
+                          <span className="block text-[11px] text-ink-muted">
+                            {e.member_id ? memberById.get(e.member_id)?.name : "Everyone"}{e.location ? ` · ${e.location}` : ""}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <aside className="flex flex-col gap-3">
+            <div className="rounded-xl border border-line bg-panel p-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Who&apos;s busy</div>
+              <div className="flex flex-col gap-1.5">
+                {members.map((m) => {
+                  const count = visible.filter((e) => e.member_id === m.id).length;
+                  return (
+                    <div key={m.id} className="flex items-center gap-2 text-sm">
+                      <span className="size-2.5 rounded-full" style={{ background: m.color }} />
+                      <span>{m.emoji} {m.name}</span>
+                      <span className="ml-auto text-ink-muted">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
         </div>
       )}
 

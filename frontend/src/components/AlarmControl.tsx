@@ -23,6 +23,22 @@ import { useMe } from "@/lib/auth";
 
 const ALARM_ENTITY = "alarm_control_panel.homehub";
 
+// Arm modes map to HA's standard services. "away" arms everything; "home"
+// and "night" arm subsets — they arm immediately but only behave
+// differently once the HA alarm_control_panel config defines their sensor
+// rules (until then HA treats them like away).
+type ArmMode = "away" | "home" | "night";
+const ARM_SERVICE: Record<ArmMode, string> = {
+  away: "alarm_arm_away",
+  home: "alarm_arm_home",
+  night: "alarm_arm_night",
+};
+const ARM_MODES: { mode: ArmMode; icon: string; label: string; desc: string }[] = [
+  { mode: "away", icon: "🛡️", label: "Away", desc: "All sensors armed · nobody home" },
+  { mode: "home", icon: "🏠", label: "Home", desc: "Perimeter only · motion off" },
+  { mode: "night", icon: "🌙", label: "Night", desc: "Perimeter + downstairs motion" },
+];
+
 const C = {
   ok: "#3fb98f",
   warn: "#f0a838",
@@ -58,8 +74,10 @@ export default function AlarmControl({
   const armed = state.startsWith("armed");
 
   const [command, setCommand] = useState<Cmd>(null);
-  // PIN keypad: non-null while waiting for digits for a pending arm/disarm
-  const [pinFor, setPinFor] = useState<null | { wantArmed: boolean }>(null);
+  // Arm-type chooser: non-null while picking Away/Home/Night.
+  const [choosingArm, setChoosingArm] = useState(false);
+  // PIN keypad: holds the pending action once a mode is chosen (or disarm).
+  const [pinFor, setPinFor] = useState<null | { wantArmed: boolean; mode?: ArmMode }>(null);
   const [pinError, setPinError] = useState("");
 
   // clear the pending command once HA reflects it (or after a failsafe timeout)
@@ -73,29 +91,24 @@ export default function AlarmControl({
     return () => clearTimeout(t);
   }, [command, state]);
 
-  const dispatch = async (wantArmed: boolean, pin?: string) => {
+  const dispatch = async (wantArmed: boolean, mode?: ArmMode, pin?: string) => {
     if (!alarm) return;
     setCommand(wantArmed ? "arm" : "disarm");
+    const service = wantArmed ? ARM_SERVICE[mode ?? "away"] : "alarm_disarm";
     try {
-      await callService(
-        "alarm_control_panel",
-        wantArmed ? "alarm_arm_away" : "alarm_disarm",
-        alarm.entity_id,
-        pin ? { pin } : {},
-      );
+      await callService("alarm_control_panel", service, alarm.entity_id, pin ? { pin } : {});
       setPinFor(null);
       setPinError("");
     } catch (e) {
       setCommand(null);
       if (e instanceof ServiceError && e.detail === "pin_required") {
-        // Server says this account is PIN-gated (covers a stale `me`)
-        setPinFor({ wantArmed });
+        setPinFor({ wantArmed, mode });
         setPinError("");
       } else if (e instanceof ServiceError && e.detail === "pin_invalid") {
-        setPinFor({ wantArmed });
+        setPinFor({ wantArmed, mode });
         setPinError("Wrong PIN");
       } else if (e instanceof ServiceError && e.status === 429) {
-        setPinFor({ wantArmed });
+        setPinFor({ wantArmed, mode });
         setPinError("Too many attempts — wait a bit");
       } else {
         console.error(e);
@@ -104,13 +117,18 @@ export default function AlarmControl({
     }
   };
 
+  // Arm press -> choose a mode first. Disarm press -> straight to PIN (or go).
   const send = (wantArmed: boolean) => {
-    if (me?.pin_set) {
-      setPinError("");
-      setPinFor({ wantArmed });
-    } else {
-      void dispatch(wantArmed);
-    }
+    if (wantArmed) { setChoosingArm(true); return; }
+    if (me?.pin_set) { setPinError(""); setPinFor({ wantArmed: false }); }
+    else void dispatch(false);
+  };
+
+  // A mode was chosen from the arm-type prompt.
+  const chooseMode = (mode: ArmMode) => {
+    setChoosingArm(false);
+    if (me?.pin_set) { setPinError(""); setPinFor({ wantArmed: true, mode }); }
+    else void dispatch(true, mode);
   };
 
   const [color, text] = STATUS[state] ?? [C.sub, state];
@@ -165,16 +183,55 @@ export default function AlarmControl({
         compact={variant === "compact"}
       />
       {variant === "compact" && badge}
+      {choosingArm && (
+        <ArmTypePrompt
+          onPick={chooseMode}
+          onCancel={() => setChoosingArm(false)}
+        />
+      )}
       {pinFor && (
         <PinPad
-          title={pinFor.wantArmed ? "PIN to arm" : "PIN to disarm"}
+          title={pinFor.wantArmed ? `PIN to arm · ${ARM_MODES.find((m) => m.mode === pinFor.mode)?.label ?? "Away"}` : "PIN to disarm"}
           tone={pinFor.wantArmed ? C.alert : C.ok}
           error={pinError}
           busy={!!command}
-          onSubmit={(pin) => void dispatch(pinFor.wantArmed, pin)}
+          onSubmit={(pin) => void dispatch(pinFor.wantArmed, pinFor.mode, pin)}
           onCancel={() => { setPinFor(null); setPinError(""); setCommand(null); }}
         />
       )}
+    </div>
+  );
+}
+
+/** Arm-type chooser: Away / Home / Night, each with a plain-English blurb. */
+function ArmTypePrompt({ onPick, onCancel }: { onPick: (m: ArmMode) => void; onCancel: () => void }) {
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center",
+               background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)" }}
+      onClick={onCancel}
+    >
+      <div onClick={(e) => e.stopPropagation()}
+           style={{ width: 320, padding: 22, borderRadius: 18, background: C.field, border: `1px solid ${C.line}`,
+                    display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ textAlign: "center", fontSize: 17, fontWeight: 600, color: C.ink }}>Arm system</div>
+        <div style={{ textAlign: "center", fontSize: 12, color: C.sub, marginTop: -6 }}>Choose a mode</div>
+        {ARM_MODES.map((m) => (
+          <button key={m.mode} onClick={() => onPick(m.mode)}
+            style={{ display: "flex", alignItems: "center", gap: 14, padding: 16, textAlign: "left",
+                     background: "#1a2330", border: `1px solid ${m.mode === "away" ? C.alert : C.line}`,
+                     borderRadius: 14, cursor: "pointer", touchAction: "manipulation" }}>
+            <span style={{ fontSize: 26 }}>{m.icon}</span>
+            <span style={{ flex: 1 }}>
+              <span style={{ display: "block", fontSize: 16, fontWeight: 600, color: C.ink }}>{m.label}</span>
+              <span style={{ display: "block", fontSize: 11, color: C.sub }}>{m.desc}</span>
+            </span>
+          </button>
+        ))}
+        <button onClick={onCancel}
+          style={{ marginTop: 4, padding: "10px 0", background: "transparent", border: "none",
+                   color: C.sub, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+      </div>
     </div>
   );
 }
@@ -200,9 +257,9 @@ function PinPad({
       disabled={busy}
       style={{
         gridColumn: wide ? "span 2" : undefined,
-        padding: "16px 0", fontSize: 20, fontWeight: 700,
-        color: C.ink, background: "#161b26", border: `1px solid ${C.line}`,
-        borderRadius: 12, cursor: "pointer", touchAction: "manipulation",
+        padding: "22px 0", fontSize: 26, fontWeight: 700,
+        color: C.ink, background: "#1a2330", border: `1px solid ${C.line}`,
+        borderRadius: 15, cursor: "pointer", touchAction: "manipulation",
       }}
     >
       {label}
@@ -220,25 +277,25 @@ function PinPad({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: 280, padding: 18, borderRadius: 16,
+          width: 320, padding: 24, borderRadius: 20,
           background: C.field, border: `1px solid ${C.line}`,
-          display: "flex", flexDirection: "column", gap: 12,
+          display: "flex", flexDirection: "column", gap: 14,
         }}
       >
-        <div style={{ fontSize: 14, fontWeight: 700, color: tone, textAlign: "center" }}>{title}</div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 10, minHeight: 14 }}>
+        <div style={{ fontSize: 17, fontWeight: 600, color: tone, textAlign: "center" }}>{title}</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 12, minHeight: 16 }}>
           {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
             <span key={i} style={{
-              width: 12, height: 12, borderRadius: 12,
+              width: 15, height: 15, borderRadius: 15,
               background: i < pin.length ? tone : "transparent",
-              border: `1.5px solid ${i < pin.length ? tone : C.line}`,
+              border: `2px solid ${i < pin.length ? tone : C.line}`,
             }} />
           ))}
         </div>
         <div style={{ minHeight: 16, fontSize: 12, color: C.alert, textAlign: "center", fontWeight: 600 }}>
           {error}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
           {["1","2","3","4","5","6","7","8","9"].map((d) => key(d, () => press(d)))}
           {key("⌫", back)}
           {key("0", () => press("0"))}
@@ -248,7 +305,7 @@ function PinPad({
           onClick={() => onSubmit(pin)}
           disabled={busy || pin.length < 4}
           style={{
-            padding: "13px 0", fontSize: 15, fontWeight: 800, borderRadius: 12,
+            padding: "16px 0", fontSize: 16, fontWeight: 800, borderRadius: 14,
             background: pin.length >= 4 ? tone : "#161b26",
             color: pin.length >= 4 ? C.field : C.sub,
             border: `1px solid ${pin.length >= 4 ? tone : C.line}`,
