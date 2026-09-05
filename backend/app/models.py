@@ -206,6 +206,7 @@ class CalendarEvent(Base):
     recur_until: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD
     # External sync bookkeeping.
     ical_uid: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    google_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(24), nullable=False, default="local")  # local | ical | google
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

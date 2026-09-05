@@ -497,3 +497,110 @@ async def kiosk_exit(
     db: AsyncSession = Depends(get_session),
 ) -> dict:
     return await _toggle_kiosk(request, body, user, db, False)
+
+
+# ============================ Google Calendar ================================
+# Admin sets the OAuth client (id/secret), connects the shared family account
+# via Google's consent screen, and syncs. All secrets stay server-side.
+from fastapi.responses import RedirectResponse  # noqa: E402
+from .. import google_cal  # noqa: E402
+
+google_router = APIRouter(prefix="/api/google", tags=["google"])
+
+
+class GoogleCredsIn(_BM):
+    client_id: str
+    client_secret: str
+
+
+class GoogleCalIn(_BM):
+    calendar_id: str
+
+
+@admin_router.get("/google/status")
+async def google_status(db: AsyncSession = Depends(get_session)) -> dict:
+    return await google_cal.status(db)
+
+
+@admin_router.put("/google/credentials")
+async def google_set_creds(
+    body: GoogleCredsIn,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    if not body.client_id.strip() or not body.client_secret.strip():
+        raise HTTPException(422, "client id and secret required")
+    await google_cal.set_credentials(db, body.client_id, body.client_secret)
+    await audit(db, admin.username, "google_creds_set", "")
+    return await google_cal.status(db)
+
+
+@admin_router.put("/google/calendar")
+async def google_set_calendar(
+    body: GoogleCalIn,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    from ..bridge import put_setting
+    await put_setting(db, google_cal.K_CAL_ID, body.calendar_id.strip() or "primary")
+    await audit(db, admin.username, "google_calendar_set", body.calendar_id)
+    return await google_cal.status(db)
+
+
+@admin_router.post("/google/connect")
+async def google_connect(
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    try:
+        url = await google_cal.build_auth_url(db)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    return {"auth_url": url}
+
+
+@admin_router.post("/google/disconnect")
+async def google_disconnect(
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    await google_cal.disconnect(db)
+    await audit(db, admin.username, "google_disconnected", "")
+    return await google_cal.status(db)
+
+
+@admin_router.post("/google/sync")
+async def google_sync(
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    try:
+        summary = await google_cal.sync(db)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"sync failed: {e}") from e
+    await audit(db, admin.username, "google_synced", str(summary))
+    return summary
+
+
+# OAuth callback — Google redirects the browser here. Not admin-guarded
+# (Google can't send our cookie), but the state parameter is the CSRF check.
+@google_router.get("/callback")
+async def google_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    code = request.query_params.get("code")
+    state = request.query_params.get("state", "")
+    err = request.query_params.get("error")
+    dest = "/admin?google="
+    if err:
+        return RedirectResponse(f"{dest}error", status_code=302)
+    if not code:
+        return RedirectResponse(f"{dest}error", status_code=302)
+    try:
+        await google_cal.handle_callback(db, code, state)
+        return RedirectResponse(f"{dest}connected", status_code=302)
+    except Exception:  # noqa: BLE001
+        return RedirectResponse(f"{dest}error", status_code=302)

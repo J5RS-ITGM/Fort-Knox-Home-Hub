@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import models  # noqa: F401 — register models with Base.metadata
 from . import allowlist
-from .api.auth_routes import admin_router, auth_router, kiosk_router
+from .api.auth_routes import admin_router, auth_router, google_router, kiosk_router
 from .api.family_routes import router as family_router
 from .api.routes import protected as protected_router
 from .api.routes import router as api_router
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
                     ("recur_days", "VARCHAR(20) NOT NULL DEFAULT ''"), ("recur_until", "VARCHAR(10)"),
                     ("ical_uid", "VARCHAR(255)"), ("source", "VARCHAR(24) NOT NULL DEFAULT 'local'"),
                 ]
-                for cname, cdef in _cal_adds:
+                for cname, cdef in _cal_adds + [("google_id", "VARCHAR(255)")]:
                     if cname not in ccols:
                         sync_conn.execute(text(f"ALTER TABLE calendar_events ADD COLUMN {cname} {cdef}"))
                         log.info("Added calendar_events.%s column", cname)
@@ -89,4 +89,5 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(family_router)
 app.include_router(kiosk_router)
+app.include_router(google_router)
 app.include_router(ws_router)

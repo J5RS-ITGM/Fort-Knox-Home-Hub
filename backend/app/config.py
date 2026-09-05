@@ -42,6 +42,25 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000"
 
+    # --- Public URL (for OAuth redirects) -----------------------------------
+    # The externally reachable origin, e.g. https://fortknox.jwbegroup.com.
+    # Used to build the Google OAuth redirect URI. Falls back to the first
+    # CORS origin in dev.
+    public_url: str = ""
+
+    # --- Secret for encrypting stored third-party tokens --------------------
+    # A stable random string; used to derive a Fernet key so the Google
+    # refresh token is encrypted at rest in app_settings. Set this in prod
+    # (.env) and never change it after tokens are stored, or they become
+    # undecryptable and the family will need to reconnect Google.
+    token_secret: str = "dev-insecure-change-me"
+
+    @property
+    def public_origin(self) -> str:
+        if self.public_url:
+            return self.public_url.rstrip("/")
+        return self.cors_origin_list[0] if self.cors_origin_list else "http://localhost:3000"
+
     @property
     def ha_ws_url(self) -> str:
         base = self.ha_url.rstrip("/")

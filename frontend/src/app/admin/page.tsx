@@ -503,6 +503,9 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </table>
         </div>
 
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Google Calendar sync</h3>
+        <GoogleCalendarCard />
+
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Kiosk mode</h3>
         <p className="-mt-1 text-[11px] text-ink-muted">
           Any signed-in screen can enter kiosk mode (family views only, big bottom tabs, no admin or deletes) with this
@@ -596,5 +599,92 @@ export default function AdminPage() {
     <AuthGate adminOnly>
       <AdminInner />
     </AuthGate>
+  );
+}
+
+interface GoogleStatus { configured: boolean; connected: boolean; email: string | null; calendar_id: string; redirect_uri: string; }
+
+function GoogleCalendarCard() {
+  const [st, setSt] = useState<GoogleStatus | null>(null);
+  const [cid, setCid] = useState("");
+  const [csec, setCsec] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(() => {
+    api("/api/admin/google/status").then((r) => (r.ok ? r.json() : null)).then(setSt).catch(() => {});
+  }, []);
+  useEffect(() => {
+    load();
+    // show a toast if we just came back from Google's consent screen
+    const q = new URLSearchParams(window.location.search).get("google");
+    if (q === "connected") setMsg("Google connected.");
+    if (q === "error") setMsg("Google connection failed — try again.");
+    if (q) window.history.replaceState({}, "", "/admin");
+  }, [load]);
+
+  const saveCreds = async () => {
+    setBusy(true); setMsg("");
+    const r = await api("/api/admin/google/credentials", { method: "PUT", body: JSON.stringify({ client_id: cid, client_secret: csec }) });
+    setBusy(false);
+    if (r.ok) { setCid(""); setCsec(""); setMsg("Credentials saved."); load(); }
+    else setMsg("Could not save credentials.");
+  };
+  const connect = async () => {
+    setBusy(true);
+    const r = await api("/api/admin/google/connect", { method: "POST" });
+    setBusy(false);
+    if (r.ok) { const d = await r.json(); window.location.href = d.auth_url; }
+    else setMsg("Set credentials first.");
+  };
+  const disconnect = async () => {
+    if (!window.confirm("Disconnect Google Calendar? Synced events stay, but two-way sync stops.")) return;
+    setBusy(true); await api("/api/admin/google/disconnect", { method: "POST" }); setBusy(false); load();
+  };
+  const sync = async () => {
+    setBusy(true); setMsg("Syncing…");
+    const r = await api("/api/admin/google/sync", { method: "POST" });
+    setBusy(false);
+    if (r.ok) { const d = await r.json(); setMsg(`Synced: ${d.pulled} in, ${d.pushed} out, ${d.updated} updated, ${d.deleted} removed.`); }
+    else { const d = await r.json().catch(() => null); setMsg(d?.detail ?? "Sync failed."); }
+  };
+
+  const input = "rounded-md border border-line bg-panel-raised px-2.5 py-1.5 text-sm outline-none focus:border-lamp/60";
+  const btn = "rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink disabled:opacity-40";
+
+  if (!st) return <p className="text-[11px] text-ink-muted">Loading…</p>;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] text-ink-muted">
+        Two-way sync with one shared family Google account. Create an OAuth client in Google Cloud (Web application),
+        add this exact redirect URI, then paste the client ID and secret below.
+      </p>
+      <div className="rounded-md border border-line bg-panel-raised px-3 py-2">
+        <span className="text-[11px] text-ink-muted">Redirect URI (paste into Google Cloud):</span>
+        <div className="break-all font-[family-name:var(--font-mono)] text-[11px]">{st.redirect_uri}</div>
+      </div>
+
+      {!st.configured ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <input className={`${input} w-72`} placeholder="Google client ID" value={cid} onChange={(e) => setCid(e.target.value)} />
+          <input className={`${input} w-72`} type="password" placeholder="Google client secret" value={csec} onChange={(e) => setCsec(e.target.value)} />
+          <button className={btn} disabled={busy || !cid || !csec} onClick={saveCreds}>Save credentials</button>
+        </div>
+      ) : !st.connected ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-ok">Client configured.</span>
+          <button className="rounded-md border border-lamp/60 bg-lamp/10 px-4 py-1.5 text-xs font-semibold text-lamp" disabled={busy} onClick={connect}>Connect Google account</button>
+          <button className={btn} disabled={busy} onClick={() => { setCid(""); setCsec(""); }}>Change credentials</button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-ok">Connected{st.email ? ` · ${st.email}` : ""}</span>
+          <button className="rounded-md border border-lamp/60 bg-lamp/10 px-4 py-1.5 text-xs font-semibold text-lamp" disabled={busy} onClick={sync}>Sync now</button>
+          <button className={btn} disabled={busy} onClick={disconnect}>Disconnect</button>
+        </div>
+      )}
+      {msg && <p className="text-[11px] text-ink-muted">{msg}</p>}
+    </div>
   );
 }

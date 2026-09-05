@@ -35,6 +35,12 @@ services:
       # For split-origin dev, set e.g. http://localhost:3000
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       PHOTOS_DIR: /data/photos
+      # External origin for OAuth redirects (Google Calendar). Set to your
+      # public URL, e.g. https://fortknox.jwbegroup.com
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      # Stable secret used to encrypt stored third-party tokens at rest.
+      # Set a strong random value in .env and never change it after connecting.
+      TOKEN_SECRET: ${TOKEN_SECRET:-dev-insecure-change-me}
     volumes:
       - ./seed.json:/app/seed.json:ro
       - photos:/data/photos
