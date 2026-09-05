@@ -47,6 +47,42 @@ export default function CalendarPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [pinPrompt, setPinPrompt] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [candidates, setCandidates] = useState<null | { title: string; date: string; time: string | null; location: string; category: string }[]>(null);
+  const scheduleFileRef = useRef<HTMLInputElement>(null);
+  const pendingImage = useRef<File | null>(null);
+
+  const extractSchedule = async (files: FileList | null, pin?: string) => {
+    const file = files?.[0] ?? pendingImage.current;
+    if (!file) return;
+    pendingImage.current = file;
+    setExtracting(true); setSyncMsg("Reading schedule…");
+    const body = new FormData(); body.append("file", file);
+    const url = pin ? `/api/google/schedule/extract?pin=${encodeURIComponent(pin)}` : "/api/google/schedule/extract";
+    const r = await fetch(`${API_URL}${url}`, { method: "POST", credentials: "include", body });
+    setExtracting(false);
+    if (r.ok) {
+      const d = await r.json();
+      setPinPrompt(false); setSyncMsg("");
+      pendingImage.current = null;
+      if (!d.events?.length) { window.alert("No events found — try a clearer photo."); return; }
+      setCandidates(d.events);
+    } else if (r.status === 403) {
+      const d = await r.json().catch(() => null);
+      if (d?.detail === "pin_required" || d?.detail === "pin_invalid") {
+        setSyncMsg(d.detail === "pin_invalid" ? "Wrong PIN." : "");
+        setPinPrompt(true); return;
+      }
+      setSyncMsg("Not allowed.");
+    } else if (r.status === 409) {
+      const d = await r.json().catch(() => null);
+      setSyncMsg(d?.detail ?? "No Gemini key set (Admin → Settings).");
+    } else {
+      setSyncMsg("Could not read the schedule.");
+    }
+    window.setTimeout(() => setSyncMsg(""), 6000);
+  };
+
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [rangeStart, rangeEnd] = useMemo(() => {
@@ -176,7 +212,7 @@ export default function CalendarPage() {
         <div className="flex rounded-lg border border-line p-0.5">
           {([["month","Month"],["week","Week"],["lanes","Lanes"],["agenda","Agenda"]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setView(v)}
-              className={`rounded-md px-3 py-1 text-xs font-medium ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
+              className={`rounded-md font-medium ${isKiosk(me) ? "px-5 py-2.5 text-sm" : "px-3 py-1 text-xs"} ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
           ))}
         </div>
         <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(-1)}>&larr;</button>
@@ -186,6 +222,14 @@ export default function CalendarPage() {
           onClick={() => { setAnchor(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setWeekAnchor(new Date()); }}>Today</button>
 
         <div className="ml-auto flex items-center gap-2">
+          {canEdit && (
+            <button onClick={() => scheduleFileRef.current?.click()} disabled={extracting}
+              className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink disabled:opacity-50">
+              {extracting ? "Reading…" : "📷 Import schedule"}
+            </button>
+          )}
+          <input ref={scheduleFileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic" hidden
+            onChange={(e) => { void extractSchedule(e.target.files); e.target.value = ""; }} />
           {canEdit && (
             <button onClick={() => runSync()} disabled={syncing}
               className="rounded-md border border-lamp/60 bg-lamp/10 px-3 py-1.5 text-xs font-semibold text-lamp disabled:opacity-50">
@@ -238,12 +282,13 @@ export default function CalendarPage() {
             {monthCells.map((d) => {
               const ds = dstr(d);
               const inMonth = d.getMonth() === anchor.getMonth();
+              if (!inMonth) return <div key={ds} className="min-h-28 lg:min-h-36 rounded-lg border border-line/30 bg-transparent" />;
               const evs = byDate.get(ds) ?? [];
               return (
                 <div key={ds}
-                  className={`min-h-28 lg:min-h-36 rounded-lg border p-2 ${ds === today ? "border-ok/50" : "border-line"} ${inMonth ? "bg-panel" : "bg-panel/40"}`}>
+                  className={`min-h-28 lg:min-h-36 rounded-lg border p-2 ${ds === today ? "border-ok/50" : "border-line"} bg-panel`}>
                   <div className="mb-1 flex items-center justify-between">
-                    <span className={`text-xs font-semibold ${inMonth ? "" : "text-ink-muted"}`}>{d.getDate()}</span>
+                    <span className="text-xs font-semibold">{d.getDate()}</span>
                     {canEdit && <button onClick={() => setCreatingOn(ds)} className="text-xs leading-none text-ink-muted hover:text-lamp">+</button>}
                   </div>
                   <div className="flex flex-col gap-0.5">
@@ -297,16 +342,16 @@ export default function CalendarPage() {
       )}
 
       {view === "lanes" && (
-        <div className="overflow-x-auto">
-          <div className="min-w-[720px]">
-            <div className="grid border-b border-line text-[11px] uppercase text-ink-muted" style={{ gridTemplateColumns: "110px repeat(7, 1fr)" }}>
+        <div className={isKiosk(me) ? "" : "overflow-x-auto"}>
+          <div className={isKiosk(me) ? "" : "min-w-[720px]"}>
+            <div className="grid border-b border-line text-[11px] uppercase text-ink-muted" style={{ gridTemplateColumns: (isKiosk(me) ? "88px" : "110px") + " repeat(7, 1fr)" }}>
               <span className="px-2 py-2" />
               {weekDays.map((d) => (
                 <span key={dstr(d)} className={`px-1 py-2 text-center ${dstr(d) === today ? "text-lamp" : ""}`}>{WD[(d.getDay() + 6) % 7]} {d.getDate()}</span>
               ))}
             </div>
             {members.map((m) => (
-              <div key={m.id} className="grid border-b border-line/60" style={{ gridTemplateColumns: "110px repeat(7, 1fr)" }}>
+              <div key={m.id} className="grid border-b border-line/60" style={{ gridTemplateColumns: (isKiosk(me) ? "88px" : "110px") + " repeat(7, 1fr)" }}>
                 <div className="flex items-center gap-2 border-r border-line px-2 py-2">
                   <span className="grid size-6 place-items-center rounded-full text-sm" style={{ background: `${m.color}33`, border: `2px solid ${m.color}` }}>{m.emoji}</span>
                   <span className="truncate text-xs">{m.name}</span>
@@ -329,7 +374,7 @@ export default function CalendarPage() {
               </div>
             ))}
             {/* whole-family (unassigned) row */}
-            <div className="grid" style={{ gridTemplateColumns: "110px repeat(7, 1fr)" }}>
+            <div className="grid" style={{ gridTemplateColumns: (isKiosk(me) ? "88px" : "110px") + " repeat(7, 1fr)" }}>
               <div className="flex items-center gap-2 border-r border-line px-2 py-2 text-xs text-ink-muted">Everyone</div>
               {weekDays.map((d) => {
                 const ds = dstr(d);
@@ -401,8 +446,18 @@ export default function CalendarPage() {
       )}
 
       {pinPrompt && (
-        <SyncPinPrompt busy={syncing} error={syncMsg === "Wrong PIN." ? syncMsg : ""}
-          onSubmit={(pin) => runSync(pin)} onClose={() => { setPinPrompt(false); setSyncMsg(""); }} />
+        <SyncPinPrompt busy={syncing || extracting} error={syncMsg === "Wrong PIN." ? syncMsg : ""}
+          onSubmit={(pin) => { if (pendingImage.current) void extractSchedule(null, pin); else void runSync(pin); }}
+          onClose={() => { setPinPrompt(false); setSyncMsg(""); pendingImage.current = null; }} />
+      )}
+
+      {candidates && (
+        <ScheduleReview
+          candidates={candidates}
+          members={members}
+          onClose={() => setCandidates(null)}
+          onAdded={async () => { setCandidates(null); await load(); }}
+        />
       )}
 
       {(editing || creatingOn) && (
@@ -535,6 +590,85 @@ function SyncPinPrompt({ busy, error, onSubmit, onClose }: {
           className="mt-3 w-full rounded-xl border border-lamp/60 bg-lamp/10 py-3 text-sm font-semibold text-lamp disabled:opacity-40">
           {busy ? "Checking…" : "Sync"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ScheduleReview({ candidates, members, onClose, onAdded }: {
+  candidates: { title: string; date: string; time: string | null; location: string; category: string }[];
+  members: Member[]; onClose: () => void; onAdded: () => void;
+}) {
+  const [rows, setRows] = useState(candidates.map((c) => ({ ...c, include: true })));
+  const [memberId, setMemberId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const input = "rounded-md border border-line bg-panel-raised px-2 py-1 text-xs outline-none focus:border-lamp/60";
+
+  const set = (i: number, patch: Partial<(typeof rows)[number]>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const add = async () => {
+    const events = rows.filter((r) => r.include).map((r) => ({
+      title: r.title, date: r.date, time: r.time, end_time: null,
+      member_id: memberId || null, category: r.category, location: r.location, notes: "",
+      recur: "none", recur_days: "", recur_until: null,
+    }));
+    if (!events.length) return;
+    setBusy(true);
+    const res = await api("/api/events/bulk", { method: "POST", body: JSON.stringify({ events }) });
+    setBusy(false);
+    if (res.ok) { const d = await res.json(); window.alert(`Added ${d.added} events.`); onAdded(); }
+    else window.alert("Could not add events.");
+  };
+
+  const count = rows.filter((r) => r.include).length;
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/80 p-4 backdrop-blur" onClick={onClose}>
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-1 text-base font-semibold">Review schedule — {candidates.length} events found</h3>
+        <p className="mb-3 text-[11px] text-ink-muted">Uncheck any mistakes, fix dates/times, then assign who it&apos;s for and add.</p>
+
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-xs text-ink-muted">Assign all to:</span>
+          <select className={`${input} py-1.5`} value={memberId} onChange={(e) => setMemberId(e.target.value)}>
+            <option value="">Whole family</option>
+            {members.map((m) => <option key={m.id} value={m.id}>{m.emoji} {m.name}</option>)}
+          </select>
+        </div>
+
+        <div className="flex-1 overflow-y-auto rounded-lg border border-line">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-panel-raised">
+              <tr className="border-b border-line text-left text-ink-muted">
+                <th className="px-2 py-2 w-8"></th><th className="px-2 py-2">Title</th>
+                <th className="px-2 py-2 w-28">Date</th><th className="px-2 py-2 w-20">Time</th><th className="px-2 py-2 w-24">Category</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} className={`border-b border-line/60 ${r.include ? "" : "opacity-40"}`}>
+                  <td className="px-2 py-1.5"><input type="checkbox" checked={r.include} onChange={(e) => set(i, { include: e.target.checked })} /></td>
+                  <td className="px-2 py-1.5"><input className={`${input} w-full`} value={r.title} onChange={(e) => set(i, { title: e.target.value })} /></td>
+                  <td className="px-2 py-1.5"><input type="date" className={`${input} w-full`} value={r.date} onChange={(e) => set(i, { date: e.target.value })} /></td>
+                  <td className="px-2 py-1.5"><input type="time" className={`${input} w-full`} value={r.time ?? ""} onChange={(e) => set(i, { time: e.target.value || null })} /></td>
+                  <td className="px-2 py-1.5">
+                    <select className={`${input} w-full`} value={r.category} onChange={(e) => set(i, { category: e.target.value })}>
+                      {CATS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm text-ink-muted hover:text-ink">Cancel</button>
+          <button onClick={add} disabled={busy || count === 0}
+            className="ml-auto rounded-lg border border-lamp/60 bg-lamp/10 px-4 py-2 text-sm font-semibold text-lamp disabled:opacity-40">
+            {busy ? "Adding…" : `Add ${count} event${count === 1 ? "" : "s"}`}
+          </button>
+        </div>
       </div>
     </div>
   );

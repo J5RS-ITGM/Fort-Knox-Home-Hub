@@ -503,6 +503,9 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </table>
         </div>
 
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">AI providers</h3>
+        <AiProvidersCard />
+
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Google Calendar sync</h3>
         <GoogleCalendarCard />
 
@@ -726,6 +729,72 @@ function GoogleCalendarCard() {
         </div>
       )}
       {msg && <p className="text-[11px] text-ink-muted">{msg}</p>}
+    </div>
+  );
+}
+
+function AiProvidersCard() {
+  const [st, setSt] = useState<{ gemini_set: boolean; gemini_model: string } | null>(null);
+  const [key, setKey] = useState("");
+  const [model, setModel] = useState("");
+  const [models, setModels] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(() => {
+    api("/api/admin/ai/status").then((r) => (r.ok ? r.json() : null)).then((d) => { setSt(d); if (d) setModel(d.gemini_model); }).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setBusy(true); setMsg("");
+    const r = await api("/api/admin/ai/gemini", { method: "PUT", body: JSON.stringify({ key: key || undefined, model }) });
+    setBusy(false);
+    if (r.ok) { setKey(""); setMsg("Saved."); load(); } else setMsg("Could not save.");
+  };
+  const clear = async () => {
+    if (!window.confirm("Remove the Gemini key?")) return;
+    setBusy(true); await api("/api/admin/ai/gemini/clear", { method: "POST" }); setBusy(false); load();
+  };
+  const fetchModels = async () => {
+    setBusy(true); setMsg("Fetching models…");
+    const r = await api("/api/admin/ai/gemini/models");
+    setBusy(false);
+    if (r.ok) { const d = await r.json(); setModels(d.models); setMsg(`${d.models.length} models available.`); }
+    else { const d = await r.json().catch(() => null); setMsg(d?.detail ?? "Could not list models."); }
+  };
+
+  const input = "rounded-md border border-line bg-panel-raised px-2.5 py-1.5 text-sm outline-none focus:border-lamp/60";
+  const btn = "rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink disabled:opacity-40";
+  if (!st) return <p className="text-[11px] text-ink-muted">Loading…</p>;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] text-ink-muted">
+        Used to read schedule photos into calendar events. The key is stored encrypted and never leaves the server.
+        Get a free key at aistudio.google.com. Default model <span className="font-[family-name:var(--font-mono)]">gemini-3.5-flash</span> — editable so a Google model change is just a settings edit.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-16 text-xs text-ink-muted">Gemini</span>
+        <input className={`${input} w-72`} type="password" placeholder={st.gemini_set ? "Key set — paste to replace" : "Paste Gemini API key"} value={key} onChange={(e) => setKey(e.target.value)} />
+        {st.gemini_set && <span className="text-xs text-ok">✓ set</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-16 text-xs text-ink-muted">Model</span>
+        {models.length > 0 ? (
+          <select className={`${input} w-72`} value={model} onChange={(e) => setModel(e.target.value)}>
+            {models.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        ) : (
+          <input className={`${input} w-72`} value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemini-3.5-flash" />
+        )}
+        <button className={btn} disabled={busy || !st.gemini_set} onClick={fetchModels}>List available</button>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="rounded-md border border-lamp/60 bg-lamp/10 px-3 py-1.5 text-xs font-semibold text-lamp disabled:opacity-40" disabled={busy || (!key && model === st.gemini_model)} onClick={save}>Save</button>
+        {st.gemini_set && <button className={btn} disabled={busy} onClick={clear}>Remove key</button>}
+        {msg && <span className="text-[11px] text-ink-muted">{msg}</span>}
+      </div>
     </div>
   );
 }

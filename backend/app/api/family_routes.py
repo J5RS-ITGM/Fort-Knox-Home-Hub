@@ -322,6 +322,35 @@ async def event_categories() -> list[str]:
     return CATEGORIES
 
 
+class BulkEventsIn(BaseModel):
+    events: list[EventIn]
+
+
+@router.post("/events/bulk", status_code=201)
+async def create_events_bulk(
+    body: BulkEventsIn,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "the panel account can't add events")
+    added = 0
+    for ev in body.events:
+        if not ev.title.strip() or len(ev.date) != 10:
+            continue
+        cat = ev.category if ev.category in CATEGORIES else "general"
+        db.add(models.CalendarEvent(
+            title=ev.title.strip(), date=ev.date, time=ev.time, end_time=ev.end_time,
+            member_id=ev.member_id, category=cat, location=ev.location.strip(),
+            notes=ev.notes, recur=ev.recur or "none", recur_days=ev.recur_days,
+            recur_until=ev.recur_until, source="local",
+        ))
+        added += 1
+    await db.commit()
+    await audit(db, user.username, "events_bulk_added", f"{added} events")
+    return {"added": added}
+
+
 # -- iCal (.ics) import / export ---------------------------------------------
 # Standards-based interchange (RFC 5545) — works with Google, Apple, Outlook
 # without OAuth. Google Calendar live two-way sync is a separate feature.

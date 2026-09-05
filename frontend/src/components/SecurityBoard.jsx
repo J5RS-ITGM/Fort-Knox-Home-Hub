@@ -6,6 +6,7 @@ import { API_URL, callService } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
+import AlarmControl from "@/components/AlarmControl";
 import {
   PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
   planFromGrid, gridFromPlan, gridRect,
@@ -836,16 +837,9 @@ export default function SecurityBoard() {
   useEffect(()=>{ selectedRef.current = selected; }, [selected]);
   useEffect(()=>{ editRef.current = edit; }, [edit]);
 
-  const setArm = async (wantArmed) => {
-    if (!alarm) return;
-    setCommand(wantArmed ? "arm" : "disarm"); // instant visual ack
-    try {
-      await callService("alarm_control_panel", wantArmed ? "alarm_arm_away" : "alarm_disarm", alarm.entity_id);
-    } catch (e) {
-      console.error(e);
-      setCommand(null); // failed: drop the pending state
-    }
-  };
+  // Arming/disarming (with mode chooser + PIN) is handled by the shared
+  // AlarmControl component rendered in the toolbar. `command`/AlarmStatus
+  // still reflect HA's echoed state for the status pill.
 
   // marker drag → update local always; persist only on drop (live === false).
   // The isometric ThreeScene calls onMoved(id, x, z) with 3 args (persist);
@@ -970,10 +964,9 @@ export default function SecurityBoard() {
         {saveNote && <span style={{fontSize:11, color:C.accent, whiteSpace:"nowrap"}}>{saveNote}</span>}
         <AlarmStatus state={alarmState} command={command}/>
       </div>
-      <div style={{display:"flex", gap:8}}>
+      <div style={{display:"flex", gap:8, alignItems:"center"}}>
         <Pill active={edit} onClick={()=>{ setEdit(e=>!e); setSelected(null); }} label={edit?"Done":"Edit"} tone={C.accent}/>
-        <Pill active={armed} busy={command==="arm"} onClick={()=>setArm(true)}  label={command==="arm" ? "Arming…" : "Arm"} tone={C.open}/>
-        <Pill active={!armed && alarmState==="disarmed"} busy={command==="disarm"} onClick={()=>setArm(false)} label={command==="disarm" ? "Disarming…" : "Disarm"} tone={C.secure}/>
+        <AlarmControl variant="compact" />
       </div>
     </div>
   );

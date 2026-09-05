@@ -12,7 +12,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -653,3 +653,85 @@ async def google_callback(
         return RedirectResponse(f"{dest}connected", status_code=302)
     except Exception:  # noqa: BLE001
         return RedirectResponse(f"{dest}error", status_code=302)
+
+
+# ============================ AI providers ===================================
+from .. import ai_providers  # noqa: E402
+
+
+class GeminiKeyIn(_BM):
+    key: str | None = None
+    model: str | None = None
+
+
+@admin_router.get("/ai/status")
+async def ai_status(db: AsyncSession = Depends(get_session)) -> dict:
+    return await ai_providers.status(db)
+
+
+@admin_router.put("/ai/gemini")
+async def ai_set_gemini(
+    body: GeminiKeyIn,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    await ai_providers.set_gemini(db, body.key, body.model)
+    await audit(db, admin.username, "ai_gemini_set", body.model or "")
+    return await ai_providers.status(db)
+
+
+@admin_router.post("/ai/gemini/clear")
+async def ai_clear_gemini(
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    await ai_providers.clear_gemini(db)
+    await audit(db, admin.username, "ai_gemini_cleared", "")
+    return await ai_providers.status(db)
+
+
+@admin_router.get("/ai/gemini/models")
+async def ai_gemini_models(db: AsyncSession = Depends(get_session)) -> dict:
+    try:
+        return {"models": await ai_providers.list_gemini_models(db)}
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"could not list models: {e}") from e
+
+
+# Schedule photo -> candidate events. PIN-gated like Google sync; returns
+# unsaved candidates for the review screen (nothing is added yet).
+@google_router.post("/schedule/extract")
+async def schedule_extract(
+    request: Request,
+    file: UploadFile,
+    pin: str | None = None,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to import schedules")
+    if user.pin_hash is not None:
+        ip = request.client.host if request.client else "?"
+        check_rate_limit(f"pin:{user.username}", ip)
+        if not pin:
+            raise HTTPException(403, "pin_required")
+        if not verify_password(str(pin), user.pin_hash):
+            record_failure(f"pin:{user.username}", ip)
+            raise HTTPException(403, "pin_invalid")
+        clear_failures(f"pin:{user.username}", ip)
+    allowed = {"image/jpeg": 1, "image/png": 1, "image/webp": 1, "image/heic": 1}
+    if (file.content_type or "") not in allowed:
+        raise HTTPException(422, "upload a JPEG, PNG, WebP, or HEIC photo")
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(413, "photo too large (15MB max)")
+    try:
+        events = await ai_providers.extract_schedule(db, data, file.content_type)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"extraction failed: {e}") from e
+    await audit(db, user.username, "schedule_extracted", f"{len(events)} events from {file.filename}")
+    return {"events": events}
