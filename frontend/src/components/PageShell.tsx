@@ -11,13 +11,13 @@ import AppHeader from "@/components/AppHeader";
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
-export default function PageShell({ title, active, children }: { title: string; active: string; children: ReactNode }) {
+export default function PageShell({ title, active, children, wide }: { title: string; active: string; children: ReactNode; wide?: boolean }) {
   return (
     <AuthGate>
       <div className="min-h-dvh">
         <ErrorBoundary><AppHeader /></ErrorBoundary>
 
-        <main className="mx-auto max-w-5xl px-4 py-6" style={{ paddingBottom: BOTTOM_TABS_HEIGHT + 32 }}>
+        <main className={`mx-auto ${wide ? "max-w-none" : "max-w-5xl"} px-4 py-6`} style={{ paddingBottom: BOTTOM_TABS_HEIGHT + 32 }}>
           <h2 className="mb-5 text-xl font-semibold">{title}</h2>
           {children}
         </main>

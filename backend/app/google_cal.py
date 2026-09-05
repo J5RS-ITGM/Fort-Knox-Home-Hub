@@ -51,6 +51,25 @@ K_EMAIL = "google_account_email"
 K_CAL_ID = "google_calendar_id"               # which Google calendar to sync (default: primary)
 K_SYNC_TOKEN = "google_sync_token"            # incremental sync cursor
 K_STATE = "google_oauth_state"                # CSRF state for the in-flight flow
+K_COLOR_MAP = "google_color_map"              # JSON {member_id: "1".."11"}
+
+# Google's 11 event colors (colorId -> modern hex), for the admin picker.
+GOOGLE_EVENT_COLORS = {
+    "1": ("Lavender", "#7986CB"), "2": ("Sage", "#33B679"), "3": ("Grape", "#8E24AA"),
+    "4": ("Flamingo", "#E67C73"), "5": ("Banana", "#F6BF26"), "6": ("Tangerine", "#F4511E"),
+    "7": ("Peacock", "#039BE5"), "8": ("Graphite", "#616161"), "9": ("Blueberry", "#3F51B5"),
+    "10": ("Basil", "#0B8043"), "11": ("Tomato", "#D50000"),
+}
+K_COLOR_MAP = "google_color_map"              # JSON {member_id: colorId "1".."11"}
+
+# Google's 11 event colors (colorId -> modern hex), for the Admin picker and
+# closest-match fallback. Google only accepts these IDs on events.
+GOOGLE_EVENT_COLORS = {
+    "1": ("Lavender", "#7986CB"), "2": ("Sage", "#33B679"), "3": ("Grape", "#8E24AA"),
+    "4": ("Flamingo", "#E67C73"), "5": ("Banana", "#F6BF26"), "6": ("Tangerine", "#F4511E"),
+    "7": ("Peacock", "#039BE5"), "8": ("Graphite", "#616161"), "9": ("Blueberry", "#3F51B5"),
+    "10": ("Basil", "#0B8043"), "11": ("Tomato", "#D50000"),
+}
 
 
 def _fernet() -> Fernet:
@@ -83,13 +102,26 @@ def redirect_uri() -> str:
 
 async def status(db: AsyncSession) -> dict:
     """Safe status for the frontend: never exposes secrets."""
+    import json as _json
+    try:
+        color_map = _json.loads(await _get(db, K_COLOR_MAP) or "{}")
+    except (ValueError, TypeError):
+        color_map = {}
     return {
         "configured": bool(await _get(db, K_CLIENT_ID) and await _get(db, K_CLIENT_SECRET)),
         "connected": bool(await _get(db, K_REFRESH)),
         "email": await _get(db, K_EMAIL),
         "calendar_id": await _get(db, K_CAL_ID) or "primary",
         "redirect_uri": redirect_uri(),
+        "palette": [{"id": k, "name": v[0], "hex": v[1]} for k, v in GOOGLE_EVENT_COLORS.items()],
+        "color_map": color_map,
     }
+
+
+async def set_color_map(db: AsyncSession, mapping: dict) -> None:
+    import json as _json
+    clean = {str(k): str(v) for k, v in mapping.items() if str(v) in GOOGLE_EVENT_COLORS}
+    await put_setting(db, K_COLOR_MAP, _json.dumps(clean))
 
 
 async def set_credentials(db: AsyncSession, client_id: str, client_secret: str) -> None:
@@ -170,13 +202,19 @@ async def _access_token(db: AsyncSession) -> str:
 
 
 # --- mapping helpers --------------------------------------------------------
-def _to_google_body(ev: models.CalendarEvent) -> dict:
-    """Fort Knox event -> Google event resource."""
+def _to_google_body(ev: models.CalendarEvent, color_map: dict | None = None) -> dict:
+    """Fort Knox event -> Google event resource. When color_map has an entry
+    for the event's member, set Google's colorId so the family member's
+    color carries over to everyone's phones."""
     body: dict = {"summary": ev.title}
     if ev.location:
         body["location"] = ev.location
     if ev.notes:
         body["description"] = ev.notes
+    if color_map and ev.member_id and color_map.get(ev.member_id):
+        cid = str(color_map[ev.member_id])
+        if cid in GOOGLE_EVENT_COLORS:
+            body["colorId"] = cid
     if ev.time:
         start = f"{ev.date}T{ev.time}:00"
         end_t = ev.end_time or ev.time
@@ -216,9 +254,15 @@ def _from_google(item: dict) -> dict | None:
 
 async def sync(db: AsyncSession, window_days: int = 120) -> dict:
     """Two-way sync within a forward window. Returns a small summary."""
+    import json as _json
+
     token = await _access_token(db)
     cal = await _get(db, K_CAL_ID) or "primary"
     headers = {"Authorization": f"Bearer {token}"}
+    try:
+        color_map = _json.loads(await _get(db, K_COLOR_MAP) or "{}")
+    except (ValueError, TypeError):
+        color_map = {}
     now = datetime.now(timezone.utc)
     time_min = (now - timedelta(days=7)).isoformat()
     time_max = (now + timedelta(days=window_days)).isoformat()
@@ -287,15 +331,38 @@ async def sync(db: AsyncSession, window_days: int = 120) -> dict:
             )
         )).scalars().all()
         for ev in to_push:
-            resp = await c.post(f"{CAL_BASE}/calendars/{cal}/events", headers=headers, json=_to_google_body(ev))
+            resp = await c.post(f"{CAL_BASE}/calendars/{cal}/events", headers=headers, json=_to_google_body(ev, color_map))
             if resp.is_success:
                 ev.google_id = resp.json().get("id")
                 pushed += 1
+
+        # 3) RE-COLOR: local events already in Google get their member color
+        # patched (cheap, keeps Google in step when the mapping changes).
+        recolored = 0
+        if color_map:
+            colored = (await db.execute(
+                select(models.CalendarEvent).where(
+                    models.CalendarEvent.google_id.is_not(None),
+                    models.CalendarEvent.source != "google",
+                    models.CalendarEvent.member_id.is_not(None),
+                    models.CalendarEvent.date >= win_start,
+                    models.CalendarEvent.date <= win_end,
+                )
+            )).scalars().all()
+            for ev in colored:
+                cid = color_map.get(ev.member_id)
+                if cid and str(cid) in GOOGLE_EVENT_COLORS:
+                    resp = await c.patch(
+                        f"{CAL_BASE}/calendars/{cal}/events/{ev.google_id}",
+                        headers=headers, json={"colorId": str(cid)},
+                    )
+                    if resp.is_success:
+                        recolored += 1
 
     await db.commit()
     await put_setting(db, K_SYNC_TOKEN, now.isoformat())
     return {
         "pulled": pulled, "pushed": pushed,
-        "updated": updated_local, "deleted": deleted_local,
+        "updated": updated_local, "deleted": deleted_local, "recolored": recolored,
         "at": now.isoformat(),
     }

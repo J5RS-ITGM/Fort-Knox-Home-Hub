@@ -569,6 +569,17 @@ async def google_disconnect(
     return await google_cal.status(db)
 
 
+@admin_router.put("/google/colors")
+async def google_set_colors(
+    body: dict,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    await google_cal.set_color_map(db, body.get("color_map", {}))
+    await audit(db, admin.username, "google_colors_set", "")
+    return await google_cal.status(db)
+
+
 @admin_router.post("/google/sync")
 async def google_sync(
     admin: models.User = Depends(require_admin),
@@ -581,6 +592,44 @@ async def google_sync(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"sync failed: {e}") from e
     await audit(db, admin.username, "google_synced", str(summary))
+    return summary
+
+
+# Any signed-in user can trigger a sync from the calendar page, gated by
+# their PIN (same credential as arm/disarm). No PIN set on the account ->
+# no gate, consistent with the alarm behavior.
+class SyncIn(_BM):
+    pin: str | None = None
+
+
+@google_router.post("/sync")
+async def google_sync_user(
+    body: SyncIn,
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to sync")
+    if user.pin_hash is not None:
+        ip = request.client.host if request.client else "?"
+        check_rate_limit(f"pin:{user.username}", ip)
+        if not body.pin:
+            raise HTTPException(403, "pin_required")
+        if not verify_password(str(body.pin), user.pin_hash):
+            record_failure(f"pin:{user.username}", ip)
+            await audit(db, user.username, "google_sync_pin_fail", "")
+            raise HTTPException(403, "pin_invalid")
+        clear_failures(f"pin:{user.username}", ip)
+    if not await google_cal._get(db, google_cal.K_REFRESH):
+        raise HTTPException(409, "Google not connected")
+    try:
+        summary = await google_cal.sync(db)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"sync failed: {e}") from e
+    await audit(db, user.username, "google_synced", str(summary))
     return summary
 
 

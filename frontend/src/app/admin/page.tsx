@@ -602,10 +602,11 @@ export default function AdminPage() {
   );
 }
 
-interface GoogleStatus { configured: boolean; connected: boolean; email: string | null; calendar_id: string; redirect_uri: string; }
+interface GoogleStatus { configured: boolean; connected: boolean; email: string | null; calendar_id: string; redirect_uri: string; palette?: { id: string; name: string; hex: string }[]; color_map?: Record<string, string>; }
 
 function GoogleCalendarCard() {
   const [st, setSt] = useState<GoogleStatus | null>(null);
+  const [members, setMembers] = useState<{ id: string; name: string; emoji: string; color: string }[]>([]);
   const [cid, setCid] = useState("");
   const [csec, setCsec] = useState("");
   const [busy, setBusy] = useState(false);
@@ -613,6 +614,7 @@ function GoogleCalendarCard() {
 
   const load = useCallback(() => {
     api("/api/admin/google/status").then((r) => (r.ok ? r.json() : null)).then(setSt).catch(() => {});
+    api("/api/family").then((r) => (r.ok ? r.json() : [])).then(setMembers).catch(() => {});
   }, []);
   useEffect(() => {
     load();
@@ -682,6 +684,45 @@ function GoogleCalendarCard() {
           <span className="text-xs text-ok">Connected{st.email ? ` · ${st.email}` : ""}</span>
           <button className="rounded-md border border-lamp/60 bg-lamp/10 px-4 py-1.5 text-xs font-semibold text-lamp" disabled={busy} onClick={sync}>Sync now</button>
           <button className={btn} disabled={busy} onClick={disconnect}>Disconnect</button>
+        </div>
+      )}
+
+      {st.connected && st.palette && members.length > 0 && (
+        <div className="mt-1 rounded-lg border border-line p-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Member colors in Google</div>
+          <p className="mb-3 text-[11px] text-ink-muted">Each person&apos;s events show in this Google color on everyone&apos;s phones. Google has 11 fixed colors, so these are the closest matches. Applied on the next sync.</p>
+          <div className="flex flex-col gap-2">
+            {members.map((m) => {
+              const cur = st.color_map?.[m.id] ?? "";
+              return (
+                <div key={m.id} className="flex items-center gap-2">
+                  <span className="flex w-32 items-center gap-1.5 text-sm">
+                    <span className="size-3 rounded-full" style={{ background: m.color }} /> {m.emoji} {m.name}
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {st.palette!.map((c) => (
+                      <button key={c.id} title={c.name}
+                        onClick={() => {
+                          const next = { ...(st.color_map ?? {}), [m.id]: c.id };
+                          setSt({ ...st, color_map: next });
+                        }}
+                        className={`size-6 rounded-full border-2 transition-transform ${cur === c.id ? "scale-110 border-ink" : "border-transparent"}`}
+                        style={{ background: c.hex }} />
+                    ))}
+                    {cur && <button onClick={() => { const next = { ...(st.color_map ?? {}) }; delete next[m.id]; setSt({ ...st, color_map: next }); }}
+                      className="ml-1 text-[11px] text-ink-muted underline">clear</button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <button className="mt-3 rounded-md border border-lamp/60 bg-lamp/10 px-3 py-1.5 text-xs font-semibold text-lamp" disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              const r = await api("/api/admin/google/colors", { method: "PUT", body: JSON.stringify({ color_map: st.color_map ?? {} }) });
+              setBusy(false);
+              setMsg(r.ok ? "Colors saved — they apply on the next sync." : "Could not save colors.");
+            }}>Save colors</button>
         </div>
       )}
       {msg && <p className="text-[11px] text-ink-muted">{msg}</p>}

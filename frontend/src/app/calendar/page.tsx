@@ -44,6 +44,9 @@ export default function CalendarPage() {
   const [catFilter, setCatFilter] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Ev | null>(null);
   const [creatingOn, setCreatingOn] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [pinPrompt, setPinPrompt] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [rangeStart, rangeEnd] = useMemo(() => {
@@ -67,6 +70,33 @@ export default function CalendarPage() {
     setMembers(m); setEvents(e);
   }, [rangeStart, rangeEnd]);
   useEffect(() => { void load(); }, [load]);
+  // Sync is gated by the user's PIN (same credential as arm/disarm). The
+  // backend is the source of truth: a 409 means Google isn't connected, a
+  // 403 pin_required/pin_invalid drives the keypad. No client-side flags.
+  const runSync = async (pin?: string) => {
+    setSyncing(true); setSyncMsg("Syncing…");
+    const r = await api("/api/google/sync", { method: "POST", body: JSON.stringify(pin ? { pin } : {}) });
+    setSyncing(false);
+    if (r.ok) {
+      const d = await r.json();
+      setPinPrompt(false);
+      setSyncMsg(`Synced: ${d.pulled} in, ${d.pushed} out${d.recolored ? `, ${d.recolored} recolored` : ""}.`);
+      await load();
+    } else if (r.status === 403) {
+      const d = await r.json().catch(() => null);
+      if (d?.detail === "pin_required" || d?.detail === "pin_invalid") {
+        setPinPrompt(true);
+        setSyncMsg(d.detail === "pin_invalid" ? "Wrong PIN." : "");
+        return;
+      }
+      setSyncMsg("Not allowed.");
+    } else if (r.status === 409) {
+      setSyncMsg("Google not connected (set it up in Admin → Settings).");
+    } else {
+      setSyncMsg("Sync failed.");
+    }
+    if (!pinPrompt) window.setTimeout(() => setSyncMsg(""), 6000);
+  };
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
   const visible = useMemo(() => events.filter((e) =>
@@ -119,7 +149,7 @@ export default function CalendarPage() {
   };
 
   return (
-    <PageShell title="Family Calendar" active="/calendar">
+    <PageShell title="Family Calendar" active="/calendar" wide>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg border border-line p-0.5">
           {(["month", "week"] as const).map((v) => (
@@ -134,6 +164,12 @@ export default function CalendarPage() {
           onClick={() => { setAnchor(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setWeekAnchor(new Date()); }}>Today</button>
 
         <div className="ml-auto flex items-center gap-2">
+          {canEdit && (
+            <button onClick={() => runSync()} disabled={syncing}
+              className="rounded-md border border-lamp/60 bg-lamp/10 px-3 py-1.5 text-xs font-semibold text-lamp disabled:opacity-50">
+              {syncing ? "Syncing…" : "↻ Sync Google"}
+            </button>
+          )}
           <a href={`${API_URL}/api/events/export.ics`} download className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink">Export .ics</a>
           {canEdit && <>
             <button onClick={() => fileRef.current?.click()} className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink">Import .ics</button>
@@ -142,6 +178,7 @@ export default function CalendarPage() {
           </>}
         </div>
       </div>
+      {syncMsg && <div className="mb-2 text-xs text-ink-muted">{syncMsg}</div>}
 
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
         {members.map((m) => {
@@ -182,22 +219,22 @@ export default function CalendarPage() {
               const evs = byDate.get(ds) ?? [];
               return (
                 <div key={ds}
-                  className={`min-h-24 rounded-lg border p-1.5 ${ds === today ? "border-ok/50" : "border-line"} ${inMonth ? "bg-panel" : "bg-panel/40"}`}>
+                  className={`min-h-28 lg:min-h-36 rounded-lg border p-2 ${ds === today ? "border-ok/50" : "border-line"} ${inMonth ? "bg-panel" : "bg-panel/40"}`}>
                   <div className="mb-1 flex items-center justify-between">
                     <span className={`text-xs font-semibold ${inMonth ? "" : "text-ink-muted"}`}>{d.getDate()}</span>
                     {canEdit && <button onClick={() => setCreatingOn(ds)} className="text-xs leading-none text-ink-muted hover:text-lamp">+</button>}
                   </div>
                   <div className="flex flex-col gap-0.5">
-                    {evs.slice(0, 4).map((e) => (
+                    {evs.slice(0, 6).map((e) => (
                       <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
-                        className="flex items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px]"
+                        className="flex items-center gap-1 truncate rounded px-1.5 py-1 text-left text-xs"
                         style={{ background: `${dot(e)}22`, color: "var(--color-ink)" }}>
                         <span className="size-1.5 shrink-0 rounded-full" style={{ background: dot(e) }} />
                         {e.time && <span className="shrink-0 text-ink-muted">{e.time}</span>}
                         <span className="truncate">{e.title}</span>
                       </button>
                     ))}
-                    {evs.length > 4 && <span className="pl-1 text-[10px] text-ink-muted">+{evs.length - 4} more</span>}
+                    {evs.length > 6 && <span className="pl-1 text-[10px] text-ink-muted">+{evs.length - 6} more</span>}
                   </div>
                 </div>
               );
@@ -210,7 +247,7 @@ export default function CalendarPage() {
             const ds = dstr(d);
             const evs = byDate.get(ds) ?? [];
             return (
-              <div key={ds} className={`min-h-[60vh] rounded-lg border p-2 ${ds === today ? "border-ok/50" : "border-line"} bg-panel`}>
+              <div key={ds} className={`min-h-[72vh] rounded-lg border p-2 ${ds === today ? "border-ok/50" : "border-line"} bg-panel`}>
                 <div className="mb-2 flex items-center justify-between">
                   <div>
                     <div className="text-[11px] uppercase text-ink-muted">{WD[(d.getDay() + 6) % 7]}</div>
@@ -233,6 +270,11 @@ export default function CalendarPage() {
             );
           })}
         </div>
+      )}
+
+      {pinPrompt && (
+        <SyncPinPrompt busy={syncing} error={syncMsg === "Wrong PIN." ? syncMsg : ""}
+          onSubmit={(pin) => runSync(pin)} onClose={() => { setPinPrompt(false); setSyncMsg(""); }} />
       )}
 
       {(editing || creatingOn) && (
@@ -330,6 +372,41 @@ function EventEditor({ members, initial, date, onClose, onSaved }: {
             <button onClick={save} disabled={busy || !f.title.trim()} className="rounded-lg border border-lamp/60 bg-lamp/10 px-4 py-2 text-sm font-semibold text-lamp disabled:opacity-40">{busy ? "Saving…" : "Save"}</button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SyncPinPrompt({ busy, error, onSubmit, onClose }: {
+  busy: boolean; error: string; onSubmit: (pin: string) => void; onClose: () => void;
+}) {
+  const [pin, setPin] = useState("");
+  const press = (d: string) => setPin((p) => (p.length < 8 ? p + d : p));
+  const key = (label: string, onClick: () => void) => (
+    <button key={label} onClick={onClick} disabled={busy}
+      className="rounded-xl border border-line bg-panel-raised py-4 text-xl font-bold">{label}</button>
+  );
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/80 p-4 backdrop-blur" onClick={onClose}>
+      <div className="w-72 rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 text-center text-sm font-semibold text-lamp">PIN to sync</div>
+        <p className="mb-3 text-center text-[11px] text-ink-muted">Enter your arm/disarm PIN.</p>
+        <div className="mb-2 flex justify-center gap-2" style={{ minHeight: 14 }}>
+          {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
+            <span key={i} className="size-3 rounded-full" style={{ background: i < pin.length ? "var(--color-lamp)" : "transparent", border: `1.5px solid ${i < pin.length ? "var(--color-lamp)" : "var(--color-line)"}` }} />
+          ))}
+        </div>
+        <div className="mb-3 min-h-4 text-center text-xs font-semibold text-alert">{error}</div>
+        <div className="grid grid-cols-3 gap-2">
+          {["1","2","3","4","5","6","7","8","9"].map((d) => key(d, () => press(d)))}
+          {key("⌫", () => setPin((p) => p.slice(0, -1)))}
+          {key("0", () => press("0"))}
+          {key("✕", onClose)}
+        </div>
+        <button onClick={() => onSubmit(pin)} disabled={busy || pin.length < 4}
+          className="mt-3 w-full rounded-xl border border-lamp/60 bg-lamp/10 py-3 text-sm font-semibold text-lamp disabled:opacity-40">
+          {busy ? "Checking…" : "Sync"}
+        </button>
       </div>
     </div>
   );
