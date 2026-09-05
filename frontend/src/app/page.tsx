@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { callService, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 import AppHeader from "@/components/AppHeader";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { Lamp } from "@/components/Lamp";
 import AlarmControl from "@/components/AlarmControl";
 import { logout, useMe } from "@/lib/auth";
@@ -154,7 +155,7 @@ function DashboardInner() {
 
   return (
     <div className="min-h-dvh">
-      <AppHeader />
+      <ErrorBoundary><AppHeader /></ErrorBoundary>
 
       <main className="mx-auto max-w-5xl px-4 py-6">
         {!linkUp && (

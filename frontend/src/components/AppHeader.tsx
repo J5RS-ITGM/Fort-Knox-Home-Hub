@@ -25,10 +25,14 @@ const NAV: [string, string][] = [
 export default function AppHeader() {
   const pathname = usePathname();
   const { linkUp, bridgeUp } = useHomeHub();
-  const { me } = useMe();
+  const { me, loading } = useMe();
+
+  // Kiosk navigates via the bottom tab bar, not this header — both is
+  // redundant. Hide until auth resolves to avoid a flash, skip for kiosk.
+  if (loading || me?.role === "kiosk") return null;
+
   const isAdmin = me?.role === "admin";
-  const isKiosk = me?.role === "kiosk";
-  const nav = isKiosk ? NAV.filter(([href]) => href !== "/") : NAV;
+  const nav = NAV;
 
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-field/90 backdrop-blur">
@@ -54,12 +58,10 @@ export default function AppHeader() {
               <Settings size={17} />
             </a>
           )}
-          {!isKiosk && (
-            <button onClick={() => logout()} aria-label="Sign out"
-                    className="grid size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-alert/50 hover:text-ink">
-              <LogOut size={17} />
-            </button>
-          )}
+          <button onClick={() => logout()} aria-label="Sign out"
+                  className="grid size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-alert/50 hover:text-ink">
+            <LogOut size={17} />
+          </button>
         </div>
 
         {/* Row 2 — equal-width nav strip */}

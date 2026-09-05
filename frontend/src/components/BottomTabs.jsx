@@ -23,9 +23,11 @@ export const BOTTOM_TABS_HEIGHT = 64; // px, excluding safe-area inset
 export default function BottomTabs() {
   const pathname = usePathname();
   const { me } = useMe();
-  // Kiosk sessions live inside the five family screens: no dashboard tab
-  // (and PageShell/pages hide sign-out + admin + deletes for them too).
-  const tabs = me?.role === "kiosk" ? TABS.filter((t) => t.href !== "/") : TABS;
+  // The bottom bar is the KIOSK navigation only. Browser/admin sessions
+  // use the top AppHeader instead — showing both is redundant. Until we
+  // know the role, render nothing (avoids a flash of the bar on desktop).
+  if (me?.role !== "kiosk") return null;
+  const tabs = TABS.filter((t) => t.href !== "/"); // kiosk: no dashboard
   return (
     <nav
       aria-label="Panel navigation"
