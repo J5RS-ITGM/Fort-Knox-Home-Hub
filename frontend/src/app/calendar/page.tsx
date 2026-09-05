@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { api } from "@/lib/api";
+import { useMe } from "@/lib/auth";
 
 interface Member { id: string; name: string; emoji: string; color: string; }
 interface Ev { id: string; title: string; date: string; time: string | null; member_id: string | null; notes: string; }
@@ -14,6 +15,8 @@ interface Ev { id: string; title: string; date: string; time: string | null; mem
 const dstr = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function CalendarPage() {
+  const { me } = useMe();
+  const canDelete = me?.role !== "kiosk";
   const [anchor, setAnchor] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
   const [members, setMembers] = useState<Member[]>([]);
   const [events, setEvents] = useState<Ev[]>([]);
@@ -129,7 +132,7 @@ export default function CalendarPage() {
                     {e.member_id && ` · ${members.find((m) => m.id === e.member_id)?.name ?? ""}`}
                   </div>
                 </div>
-                <button onClick={() => removeEvent(e.id)} className="text-xs text-ink-muted hover:text-alert">✕</button>
+                {canDelete && <button onClick={() => removeEvent(e.id)} className="text-xs text-ink-muted hover:text-alert">✕</button>}
               </div>
             ))}
           </div>

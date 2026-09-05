@@ -134,8 +134,8 @@ async def create_user(
     exists = (await db.execute(select(models.User).where(models.User.username == username))).scalar_one_or_none()
     if exists:
         raise HTTPException(409, "username already exists")
-    if body.role not in ("admin", "member"):
-        raise HTTPException(422, "role must be admin or member")
+    if body.role not in ("admin", "member", "kiosk"):
+        raise HTTPException(422, "role must be admin, member, or kiosk")
     _validate_password(body.password)
     user = models.User(
         username=username,
@@ -162,8 +162,8 @@ async def patch_user(
         raise HTTPException(404, "no such user")
     changes: list[str] = []
     if body.role is not None:
-        if body.role not in ("admin", "member"):
-            raise HTTPException(422, "role must be admin or member")
+        if body.role not in ("admin", "member", "kiosk"):
+            raise HTTPException(422, "role must be admin, member, or kiosk")
         if user.id == admin.id and body.role != "admin":
             raise HTTPException(422, "you cannot demote yourself")
         user.role = body.role

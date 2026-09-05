@@ -7,6 +7,7 @@
 
 import { usePathname } from "next/navigation";
 import { CalendarDays, Home, Images, LayoutGrid, ListChecks, Shield } from "lucide-react";
+import { useMe } from "@/lib/auth";
 
 const TABS = [
   { href: "/panel", label: "Panel", Icon: LayoutGrid },
@@ -21,6 +22,10 @@ export const BOTTOM_TABS_HEIGHT = 64; // px, excluding safe-area inset
 
 export default function BottomTabs() {
   const pathname = usePathname();
+  const { me } = useMe();
+  // Kiosk sessions live inside the five family screens: no dashboard tab
+  // (and PageShell/pages hide sign-out + admin + deletes for them too).
+  const tabs = me?.role === "kiosk" ? TABS.filter((t) => t.href !== "/") : TABS;
   return (
     <nav
       aria-label="Panel navigation"
@@ -33,7 +38,7 @@ export default function BottomTabs() {
         borderTop: "1px solid #262c3b",
       }}
     >
-      {TABS.map(({ href, label, Icon }) => {
+      {tabs.map(({ href, label, Icon }) => {
         const active = pathname === href;
         return (
           <a

@@ -7,10 +7,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { api, API_URL } from "@/lib/api";
+import { useMe } from "@/lib/auth";
 
 interface Photo { id: string; original: string; uploaded_by: string; created_at: string; }
 
 export default function GalleryPage() {
+  const { me } = useMe();
+  const canDelete = me?.role !== "kiosk";
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [uploading, setUploading] = useState(0); // count in flight
   const [view, setView] = useState<Photo | null>(null);
@@ -80,7 +83,9 @@ export default function GalleryPage() {
                  className="max-h-[78vh] rounded-xl object-contain" />
             <div className="flex items-center gap-3 text-xs text-ink-muted">
               <span className="flex-1 truncate">{view.original || "Photo"} · {view.uploaded_by} · {new Date(view.created_at).toLocaleDateString()}</span>
-              <button onClick={() => remove(view)} className="rounded-md border border-alert/50 px-3 py-1.5 font-semibold text-alert">Delete</button>
+              {canDelete && (
+                <button onClick={() => remove(view)} className="rounded-md border border-alert/50 px-3 py-1.5 font-semibold text-alert">Delete</button>
+              )}
               <button onClick={() => setView(null)} className="rounded-md border border-line px-3 py-1.5 text-ink">Close</button>
             </div>
           </div>

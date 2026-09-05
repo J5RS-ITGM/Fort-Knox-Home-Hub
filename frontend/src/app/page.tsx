@@ -74,7 +74,7 @@ function Lamp({ on, alert }: { on: boolean; alert?: boolean }) {
   return <span className={`inline-block size-2 shrink-0 rounded-full ${color} ${on && !alert ? "lamp-live" : ""}`} />;
 }
 
-function StatusRail({ linkUp, bridgeUp, alarm, isAdmin }: { linkUp: boolean; bridgeUp: boolean; alarm?: Entity; isAdmin: boolean }) {
+function StatusRail({ linkUp, bridgeUp, alarm, isAdmin, isKiosk }: { linkUp: boolean; bridgeUp: boolean; alarm?: Entity; isAdmin: boolean; isKiosk: boolean }) {
   return (
     <header className="sticky top-0 z-10 border-b border-line bg-field/90 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
@@ -102,9 +102,11 @@ function StatusRail({ linkUp, bridgeUp, alarm, isAdmin }: { linkUp: boolean; bri
               Admin
             </a>
           )}
-          <button onClick={() => logout()} className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-alert/50 hover:text-ink">
-            Sign out
-          </button>
+          {!isKiosk && (
+            <button onClick={() => logout()} className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-alert/50 hover:text-ink">
+              Sign out
+            </button>
+          )}
         </nav>
         <div className="flex items-center gap-4 text-xs text-ink-muted">
           <span className="flex items-center gap-1.5"><Lamp on={linkUp} alert={!linkUp} /> App link</span>
@@ -197,7 +199,7 @@ function DashboardInner() {
 
   return (
     <div className="min-h-dvh">
-      <StatusRail linkUp={linkUp} bridgeUp={bridgeUp} alarm={alarm} isAdmin={me?.role === "admin"} />
+      <StatusRail linkUp={linkUp} bridgeUp={bridgeUp} alarm={alarm} isAdmin={me?.role === "admin"} isKiosk={me?.role === "kiosk"} />
 
       <main className="mx-auto max-w-5xl px-4 py-6">
         {!linkUp && (

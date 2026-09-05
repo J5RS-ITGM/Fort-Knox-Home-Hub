@@ -207,6 +207,8 @@ async def delete_event(
     user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> None:
+    if user.role == "kiosk":
+        raise HTTPException(403, "the panel account can't delete events")
     e = await db.get(models.CalendarEvent, event_id)
     if e is None:
         raise HTTPException(404, "no such event")
@@ -283,6 +285,8 @@ async def delete_photo(
     user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> None:
+    if user.role == "kiosk":
+        raise HTTPException(403, "the panel account can't delete photos")
     p = await db.get(models.Photo, photo_id)
     if p is None:
         raise HTTPException(404, "no such photo")

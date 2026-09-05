@@ -112,9 +112,12 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
                 <td className="px-3 py-2.5"><span className={u.disabled ? "text-alert" : "text-ok"}>{u.disabled ? "disabled" : "active"}</span></td>
                 <td className="px-3 py-2.5">
                   <div className="flex flex-wrap gap-1.5">
-                    <button disabled={busy} className={btn} onClick={() => patch(u.id, { role: u.role === "admin" ? "member" : "admin" })}>
-                      {u.role === "admin" ? "Make member" : "Make admin"}
-                    </button>
+                    <select disabled={busy} className={`${btn} cursor-pointer`} value={u.role}
+                            onChange={(e) => patch(u.id, { role: e.target.value })}>
+                      <option value="member">member</option>
+                      <option value="admin">admin</option>
+                      <option value="kiosk">kiosk (wall panel)</option>
+                    </select>
                     <button disabled={busy} className={btn} onClick={() => patch(u.id, { disabled: !u.disabled })}>
                       {u.disabled ? "Enable" : "Disable"}
                     </button>
@@ -148,7 +151,7 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
         <input className={input} placeholder="Display name" value={nu.display_name} onChange={(e) => setNu({ ...nu, display_name: e.target.value })} />
         <input className={input} type="password" placeholder="Password (10+)" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
         <select className={input} value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
-          <option value="member">member</option><option value="admin">admin</option>
+          <option value="member">member</option><option value="admin">admin</option><option value="kiosk">kiosk (wall panel)</option>
         </select>
         <button disabled={busy || !nu.username || !nu.password} className={primary}
           onClick={() => act(() => api("/api/admin/users", { method: "POST", body: JSON.stringify(nu) })).then((ok) => ok && setNu({ username: "", password: "", display_name: "", role: "member" }))}>

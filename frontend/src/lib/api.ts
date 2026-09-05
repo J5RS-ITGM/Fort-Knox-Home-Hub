@@ -19,7 +19,7 @@ export interface User {
   id: string;
   username: string;
   display_name: string;
-  role: "admin" | "member";
+  role: "admin" | "member" | "kiosk";
   disabled: boolean;
   pin_set: boolean;
   created_at: string;

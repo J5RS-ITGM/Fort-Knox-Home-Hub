@@ -9,6 +9,7 @@ import { ReactNode } from "react";
 import AlarmControl from "@/components/AlarmControl";
 import AuthGate from "@/components/AuthGate";
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
+import { useMe } from "@/lib/auth";
 
 const NAV: [string, string][] = [
   ["/", "Home"],
@@ -20,6 +21,8 @@ const NAV: [string, string][] = [
 ];
 
 export default function PageShell({ title, active, children }: { title: string; active: string; children: ReactNode }) {
+  const { me } = useMe();
+  const nav = me?.role === "kiosk" ? NAV.filter(([href]) => href !== "/") : NAV;
   return (
     <AuthGate>
       <div className="min-h-dvh">
@@ -29,7 +32,7 @@ export default function PageShell({ title, active, children }: { title: string; 
               Home<span className="text-lamp">Hub</span>
             </h1>
             <nav className="flex flex-wrap items-center gap-2">
-              {NAV.map(([href, label]) => (
+              {nav.map(([href, label]) => (
                 <a key={href} href={href}
                    className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
                      href === active
