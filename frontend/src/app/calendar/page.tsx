@@ -209,17 +209,19 @@ export default function CalendarPage() {
   return (
     <PageShell title="Family Calendar" active="/calendar" wide>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg border border-line p-0.5">
+        <div className="flex w-full rounded-lg border border-line p-0.5 sm:w-auto">
           {([["month","Month"],["week","Week"],["lanes","Lanes"],["agenda","Agenda"]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setView(v)}
-              className={`rounded-md font-medium ${isKiosk(me) ? "px-5 py-2.5 text-sm" : "px-3 py-1 text-xs"} ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
+              className={`flex-1 rounded-md font-medium sm:flex-none ${isKiosk(me) ? "px-5 py-2.5 text-sm" : "px-3 py-1.5 text-xs"} ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
           ))}
         </div>
-        <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(-1)}>&larr;</button>
-        <span className="min-w-40 text-center text-sm font-semibold">{title}</span>
-        <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(1)}>&rarr;</button>
-        <button className="rounded-md border border-line px-3 py-1 text-xs text-ink-muted hover:text-ink"
-          onClick={() => { setAnchor(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setWeekAnchor(new Date()); }}>Today</button>
+        <div className="flex items-center gap-2">
+          <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(-1)}>&larr;</button>
+          <span className="min-w-32 text-center text-sm font-semibold sm:min-w-40">{title}</span>
+          <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(1)}>&rarr;</button>
+          <button className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink"
+            onClick={() => { setAnchor(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setWeekAnchor(new Date()); }}>Today</button>
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           {canEdit && (
@@ -275,56 +277,67 @@ export default function CalendarPage() {
 
       {view === "month" && (
         <div>
-          <div className="mb-1 grid grid-cols-7 text-center text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-            {WD.map((d) => <div key={d} className="py-1">{d}</div>)}
+          <div className="mb-1 grid grid-cols-7 text-center text-[9px] font-semibold uppercase tracking-wide text-ink-muted sm:text-[11px]">
+            {WD.map((d) => <div key={d} className="py-1"><span className="sm:hidden">{d[0]}</span><span className="hidden sm:inline">{d}</span></div>)}
           </div>
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
             {monthCells.map((d) => {
               const ds = dstr(d);
               const inMonth = d.getMonth() === anchor.getMonth();
-              if (!inMonth) return <div key={ds} className="min-h-28 lg:min-h-36 rounded-lg border border-line/30 bg-transparent" />;
+              if (!inMonth) return <div key={ds} className="min-h-14 rounded border border-line/30 bg-transparent sm:min-h-28 lg:min-h-36" />;
               const evs = byDate.get(ds) ?? [];
               return (
                 <div key={ds}
-                  className={`min-h-28 lg:min-h-36 rounded-lg border p-2 ${ds === today ? "border-ok/50" : "border-line"} bg-panel`}>
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="text-xs font-semibold">{d.getDate()}</span>
-                    {canEdit && <button onClick={() => setCreatingOn(ds)} className="text-xs leading-none text-ink-muted hover:text-lamp">+</button>}
+                  className={`min-h-14 rounded border p-0.5 sm:min-h-28 sm:rounded-lg sm:p-2 lg:min-h-36 ${ds === today ? "border-ok/50" : "border-line"} bg-panel`}>
+                  <div className="mb-0.5 flex items-center justify-between sm:mb-1">
+                    <span className="text-[10px] font-semibold sm:text-xs">{d.getDate()}</span>
+                    {canEdit && <button onClick={() => setCreatingOn(ds)} className="hidden text-xs leading-none text-ink-muted hover:text-lamp sm:block">+</button>}
                   </div>
                   <div className="flex flex-col gap-0.5">
-                    {evs.slice(0, 6).map((e) => (
-                      <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
-                        className="flex items-center gap-1 truncate rounded px-1.5 py-1 text-left text-xs"
-                        style={{ background: `${dot(e)}22`, color: "var(--color-ink)" }}>
-                        <span className="size-1.5 shrink-0 rounded-full" style={{ background: dot(e) }} />
-                        {e.time && <span className="shrink-0 text-ink-muted">{e.time}</span>}
-                        <span className="truncate">{e.title}</span>
-                      </button>
-                    ))}
-                    {evs.length > 6 && <span className="pl-1 text-[10px] text-ink-muted">+{evs.length - 6} more</span>}
+                    {/* mobile: color dots only; larger screens: full chips */}
+                    <div className="flex flex-wrap gap-0.5 sm:hidden">
+                      {evs.slice(0, 6).map((e) => (
+                        <span key={e.id + e.date} className="size-1.5 rounded-full" style={{ background: dot(e) }} />
+                      ))}
+                    </div>
+                    <div className="hidden flex-col gap-0.5 sm:flex">
+                      {evs.slice(0, 6).map((e) => (
+                        <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
+                          className="flex items-center gap-1 truncate rounded px-1.5 py-1 text-left text-xs"
+                          style={{ background: `${dot(e)}22`, color: "var(--color-ink)" }}>
+                          <span className="size-1.5 shrink-0 rounded-full" style={{ background: dot(e) }} />
+                          {e.time && <span className="shrink-0 text-ink-muted">{e.time}</span>}
+                          <span className="truncate">{e.title}</span>
+                        </button>
+                      ))}
+                      {evs.length > 6 && <span className="pl-1 text-[10px] text-ink-muted">+{evs.length - 6} more</span>}
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
+          {/* mobile: tapping a day opens it in agenda-style below */}
+          <p className="mt-2 text-center text-[11px] text-ink-muted sm:hidden">Dots show events — switch to Agenda or Week for details on mobile.</p>
         </div>
       )}
 
       {view === "week" && (
-        <div className="grid grid-cols-7 gap-1">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-7 sm:gap-1">
           {weekDays.map((d) => {
             const ds = dstr(d);
             const evs = byDate.get(ds) ?? [];
             return (
-              <div key={ds} className={`min-h-[72vh] rounded-lg border p-2 ${ds === today ? "border-ok/50" : "border-line"} bg-panel`}>
+              <div key={ds} className={`rounded-lg border p-2 sm:min-h-[72vh] ${ds === today ? "border-ok/50" : "border-line"} bg-panel`}>
                 <div className="mb-2 flex items-center justify-between">
-                  <div>
+                  <div className="flex items-baseline gap-2 sm:block">
                     <div className="text-[11px] uppercase text-ink-muted">{WD[(d.getDay() + 6) % 7]}</div>
                     <div className="text-sm font-semibold">{d.getDate()}</div>
                   </div>
                   {canEdit && <button onClick={() => setCreatingOn(ds)} className="text-ink-muted hover:text-lamp">+</button>}
                 </div>
                 <div className="flex flex-col gap-1">
+                  {evs.length === 0 && <div className="text-[11px] text-ink-muted sm:hidden">—</div>}
                   {evs.map((e) => (
                     <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
                       className="rounded-md border-l-2 bg-panel-raised px-2 py-1 text-left"
@@ -398,7 +411,7 @@ export default function CalendarPage() {
 
       {view === "agenda" && (
         <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 lg:order-1 order-2">
             {agendaDays.map(({ ds, label, evs }) => (
               <div key={ds}>
                 <div className={`mb-2 text-sm font-semibold ${ds === today ? "text-lamp" : ""}`}>{label}</div>
@@ -425,7 +438,7 @@ export default function CalendarPage() {
               </div>
             ))}
           </div>
-          <aside className="flex flex-col gap-3">
+          <aside className="flex flex-col gap-3 lg:order-2 order-1">
             <div className="rounded-xl border border-line bg-panel p-3">
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Who&apos;s busy</div>
               <div className="flex flex-col gap-1.5">
@@ -446,7 +459,11 @@ export default function CalendarPage() {
       )}
 
       {pinPrompt && (
-        <SyncPinPrompt busy={syncing || extracting} error={syncMsg === "Wrong PIN." ? syncMsg : ""}
+        <SyncPinPrompt
+          title={pendingImage.current ? "PIN to import" : "PIN to sync"}
+          subtitle={pendingImage.current ? `Confirm reading "${pendingImage.current.name.slice(0, 28)}" into events.` : "Confirm syncing with Google Calendar."}
+          confirmLabel={pendingImage.current ? "Read schedule" : "Sync"}
+          busy={syncing || extracting} error={syncMsg === "Wrong PIN." ? syncMsg : ""}
           onSubmit={(pin) => { if (pendingImage.current) void extractSchedule(null, pin); else void runSync(pin); }}
           onClose={() => { setPinPrompt(false); setSyncMsg(""); pendingImage.current = null; }} />
       )}
@@ -560,7 +577,8 @@ function EventEditor({ members, initial, date, onClose, onSaved }: {
   );
 }
 
-function SyncPinPrompt({ busy, error, onSubmit, onClose }: {
+function SyncPinPrompt({ title, subtitle, confirmLabel, busy, error, onSubmit, onClose }: {
+  title: string; subtitle: string; confirmLabel: string;
   busy: boolean; error: string; onSubmit: (pin: string) => void; onClose: () => void;
 }) {
   const [pin, setPin] = useState("");
@@ -572,8 +590,8 @@ function SyncPinPrompt({ busy, error, onSubmit, onClose }: {
   return (
     <div className="fixed inset-0 z-[70] grid place-items-center bg-black/80 p-4 backdrop-blur" onClick={onClose}>
       <div className="w-72 rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-1 text-center text-sm font-semibold text-lamp">PIN to sync</div>
-        <p className="mb-3 text-center text-[11px] text-ink-muted">Enter your arm/disarm PIN.</p>
+        <div className="mb-1 text-center text-base font-semibold text-lamp">{title}</div>
+        <p className="mb-3 text-center text-xs text-ink-muted">{subtitle}</p>
         <div className="mb-2 flex justify-center gap-2" style={{ minHeight: 14 }}>
           {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
             <span key={i} className="size-3 rounded-full" style={{ background: i < pin.length ? "var(--color-lamp)" : "transparent", border: `1.5px solid ${i < pin.length ? "var(--color-lamp)" : "var(--color-line)"}` }} />
@@ -588,7 +606,7 @@ function SyncPinPrompt({ busy, error, onSubmit, onClose }: {
         </div>
         <button onClick={() => onSubmit(pin)} disabled={busy || pin.length < 4}
           className="mt-3 w-full rounded-xl border border-lamp/60 bg-lamp/10 py-3 text-sm font-semibold text-lamp disabled:opacity-40">
-          {busy ? "Checking…" : "Sync"}
+          {busy ? "Checking…" : confirmLabel}
         </button>
       </div>
     </div>
@@ -636,8 +654,8 @@ function ScheduleReview({ candidates, members, onClose, onAdded }: {
           </select>
         </div>
 
-        <div className="flex-1 overflow-y-auto rounded-lg border border-line">
-          <table className="w-full text-xs">
+        <div className="flex-1 overflow-auto rounded-lg border border-line">
+          <table className="w-full min-w-[440px] text-xs">
             <thead className="sticky top-0 bg-panel-raised">
               <tr className="border-b border-line text-left text-ink-muted">
                 <th className="px-2 py-2 w-8"></th><th className="px-2 py-2">Title</th>
