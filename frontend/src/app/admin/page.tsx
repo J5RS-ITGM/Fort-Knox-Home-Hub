@@ -227,25 +227,33 @@ function DevicesTab({ placements, entities, busy, act }: { placements: Placement
           Export sensors (.xlsx)
         </a>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-line"><th className={th}>Entity</th><th className={th}>Room</th><th className={th}>Floor</th><th className={th}>X</th><th className={th}>Y</th><th className={th}>Live</th><th className={th}></th></tr></thead>
+      <div className="rounded-lg border border-line">
+        <table className="w-full table-fixed text-sm">
+          <thead><tr className="border-b border-line">
+            <th className={`${th} w-[38%]`}>Entity</th>
+            <th className={th}>Room</th>
+            <th className={`${th} w-24`}>Floor</th>
+            <th className={`${th} w-16`}>X</th>
+            <th className={`${th} w-16`}>Y</th>
+            <th className={`${th} w-16`}>Live</th>
+            <th className={`${th} w-20`}></th>
+          </tr></thead>
           <tbody>
             {placements.map((p) => {
               const ent = entities.find((e) => e.entity_id === p.entity_id);
               return (
-                <tr key={p.id} className="border-b border-line/60 last:border-0">
-                  <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-[11px]">{p.entity_id}</td>
+                <tr key={p.id} className="border-b border-line/60 last:border-0 align-top">
+                  <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] break-all">{p.entity_id}</td>
                   <td className="px-3 py-2">
-                    <input className={`${input} w-32 py-1`} defaultValue={p.room} onBlur={(e) => e.target.value !== p.room && save(p, { room: e.target.value })} />
+                    <input className={`${input} w-full py-1`} defaultValue={p.room} onBlur={(e) => e.target.value !== p.room && save(p, { room: e.target.value })} />
                   </td>
                   <td className="px-3 py-2">
-                    <select className={`${input} py-1`} value={p.floor} disabled={busy} onChange={(e) => save(p, { floor: Number(e.target.value) })}>
+                    <select className={`${input} w-full py-1`} value={p.floor} disabled={busy} onChange={(e) => save(p, { floor: Number(e.target.value) })}>
                       <option value={0}>Ground</option><option value={1}>Upstairs</option>
                     </select>
                   </td>
-                  <td className="px-3 py-2"><input className={`${input} w-20 py-1`} type="number" step="0.1" defaultValue={p.x} onBlur={(e) => Number(e.target.value) !== p.x && save(p, { x: Number(e.target.value) })} /></td>
-                  <td className="px-3 py-2"><input className={`${input} w-20 py-1`} type="number" step="0.1" defaultValue={p.y} onBlur={(e) => Number(e.target.value) !== p.y && save(p, { y: Number(e.target.value) })} /></td>
+                  <td className="px-3 py-2"><input className={`${input} w-full py-1`} type="number" step="0.1" defaultValue={p.x} onBlur={(e) => Number(e.target.value) !== p.x && save(p, { x: Number(e.target.value) })} /></td>
+                  <td className="px-3 py-2"><input className={`${input} w-full py-1`} type="number" step="0.1" defaultValue={p.y} onBlur={(e) => Number(e.target.value) !== p.y && save(p, { y: Number(e.target.value) })} /></td>
                   <td className="px-3 py-2">
                     {ent ? <span className={ent.state === "on" ? "text-alert" : "text-ok"}>{ent.state === "on" ? "active" : "clear"}</span>
                          : <span className="text-ink-muted">offline</span>}
@@ -452,6 +460,49 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
         </div>
         <p className="text-[11px] text-ink-muted">Armed alerts always stay until acknowledged. Changes reach open panels within a minute.</p>
 
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Per-sensor alert rules</h3>
+        <p className="-mt-1 text-[11px] text-ink-muted">
+          Override the global setting per sensor — e.g. set daytime-noisy motion sensors to &quot;Only while armed&quot;.
+        </p>
+        <div className="max-h-80 overflow-y-auto rounded-lg border border-line">
+          <table className="w-full text-sm">
+            <tbody>
+              {alertable.length === 0 && (
+                <tr><td className="px-3 py-3 text-xs text-ink-muted">No sensors visible — bridge offline?</td></tr>
+              )}
+              {alertable.map((e) => {
+                const rules = parseRules(form.alert_rules);
+                const cur = rules[e.entity_id] ?? "default";
+                return (
+                  <tr key={e.entity_id} className="border-b border-line/60 last:border-0">
+                    <td className="px-3 py-2">
+                      <div className="text-sm">{e.friendly_name || e.entity_id}</div>
+                      <div className="font-[family-name:var(--font-mono)] text-[10px] text-ink-muted">{e.entity_id}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <select
+                        className={`${input} py-1 text-xs`}
+                        value={cur}
+                        onChange={(ev) => {
+                          const next = parseRules(form.alert_rules);
+                          if (ev.target.value === "default") delete next[e.entity_id];
+                          else next[e.entity_id] = ev.target.value as Rule;
+                          setForm({ ...form, alert_rules: JSON.stringify(next) });
+                        }}
+                      >
+                        <option value="default">Default</option>
+                        <option value="all">Always</option>
+                        <option value="armed_only">Only while armed</option>
+                        <option value="off">Never</option>
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Kiosk mode</h3>
         <p className="-mt-1 text-[11px] text-ink-muted">
           Any signed-in screen can enter kiosk mode (family views only, big bottom tabs, no admin or deletes) with this
@@ -498,48 +549,6 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
         </div>
         <p className="text-[11px] text-ink-muted">Preview applies live on this device; Save settings pushes it to every panel.</p>
 
-        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Per-sensor alert rules</h3>
-        <p className="-mt-1 text-[11px] text-ink-muted">
-          Override the global setting per sensor — e.g. set daytime-noisy motion sensors to &quot;Only while armed&quot;.
-        </p>
-        <div className="max-h-80 overflow-y-auto rounded-lg border border-line">
-          <table className="w-full text-sm">
-            <tbody>
-              {alertable.length === 0 && (
-                <tr><td className="px-3 py-3 text-xs text-ink-muted">No sensors visible — bridge offline?</td></tr>
-              )}
-              {alertable.map((e) => {
-                const rules = parseRules(form.alert_rules);
-                const cur = rules[e.entity_id] ?? "default";
-                return (
-                  <tr key={e.entity_id} className="border-b border-line/60 last:border-0">
-                    <td className="px-3 py-2">
-                      <div className="text-sm">{e.friendly_name || e.entity_id}</div>
-                      <div className="font-[family-name:var(--font-mono)] text-[10px] text-ink-muted">{e.entity_id}</div>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <select
-                        className={`${input} py-1 text-xs`}
-                        value={cur}
-                        onChange={(ev) => {
-                          const next = parseRules(form.alert_rules);
-                          if (ev.target.value === "default") delete next[e.entity_id];
-                          else next[e.entity_id] = ev.target.value as Rule;
-                          setForm({ ...form, alert_rules: JSON.stringify(next) });
-                        }}
-                      >
-                        <option value="default">Default</option>
-                        <option value="all">Always</option>
-                        <option value="armed_only">Only while armed</option>
-                        <option value="off">Never</option>
-                      </select>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
         <button disabled={busy} className={`${primary} mt-1 self-start`}
           onClick={() => {
             // send ONLY known editable fields — never echo back whatever the

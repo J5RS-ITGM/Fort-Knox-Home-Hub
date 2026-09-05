@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import AuthGate from "@/components/AuthGate";
 import BottomTabs from "@/components/BottomTabs";
+import PanelNav from "@/components/PanelNav";
 
 // SecurityBoard drives WebGL + pointer capture; render client-side only.
 const SecurityBoard = dynamic(() => import("@/components/SecurityBoard.jsx"), {
@@ -17,6 +18,7 @@ const SecurityBoard = dynamic(() => import("@/components/SecurityBoard.jsx"), {
 export default function SecurityPage() {
   return (
     <AuthGate>
+      <PanelNav />
       <SecurityBoard />
       <BottomTabs />
     </AuthGate>

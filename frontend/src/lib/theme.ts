@@ -10,6 +10,7 @@
  *  mirror → default "dark". Admin edits win and sync to every device. */
 
 import { useEffect, useState } from "react";
+import { API_URL } from "@/lib/api";
 
 export type ThemeName = "light" | "moderate" | "dark";
 export const THEMES: ThemeName[] = ["light", "moderate", "dark"];
@@ -130,7 +131,7 @@ export function useTheme() {
     setState({ theme, accent });
 
     // then reconcile with server (admin-set, cross-device)
-    fetch(`/api/ui-settings`, { credentials: "include" })
+    fetch(`${API_URL}/api/ui-settings`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : {}))
       .then((v: Record<string, string>) => {
         const next: ThemeState = {

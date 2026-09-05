@@ -181,16 +181,32 @@ class ChoreCompletion(Base):
 
 
 class CalendarEvent(Base):
-    """Family calendar — app-owned data (HA is not involved)."""
+    """Family calendar — app-owned data (HA is not involved). Supports
+    categories (school/sports/etc.), an optional end time, a location, and
+    simple weekly/daily/monthly recurrence expanded at read time. External
+    sync fields (ical_uid / source) let imported events round-trip and
+    dedupe against re-imports."""
 
     __tablename__ = "calendar_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
-    date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)   # YYYY-MM-DD (start)
     time: Mapped[str | None] = mapped_column(String(5), nullable=True)          # HH:MM or null = all-day
+    end_time: Mapped[str | None] = mapped_column(String(5), nullable=True)      # HH:MM optional
     member_id: Mapped[str | None] = mapped_column(ForeignKey("family_members.id", ondelete="SET NULL"), nullable=True)
+    category: Mapped[str] = mapped_column(String(24), nullable=False, default="general")
+    location: Mapped[str] = mapped_column(String(160), nullable=False, default="")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Recurrence: "none" | "daily" | "weekly" | "biweekly" | "monthly".
+    # For weekly/biweekly, recur_days is a CSV of weekday nums (0=Mon..6=Sun);
+    # empty means "same weekday as start". recur_until bounds the expansion.
+    recur: Mapped[str] = mapped_column(String(12), nullable=False, default="none")
+    recur_days: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    recur_until: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD
+    # External sync bookkeeping.
+    ical_uid: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="local")  # local | ical | google
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

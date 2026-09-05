@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Entity } from "@/lib/api";
+import { api, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 // Defaults; overridden by Admin -> Settings (alerts_mode, colors, timer).
@@ -73,7 +73,7 @@ export default function SensorFlash() {
   useEffect(() => {
     let alive = true;
     const load = () =>
-      fetch(`/api/ui-settings`, { credentials: "include" })
+      api("/api/ui-settings")
         .then((r) => (r.ok ? r.json() : {}))
         .then((v) => { if (alive) setCfg(parseCfg(v)); })
         .catch(() => {});

@@ -46,6 +46,17 @@ async def lifespan(app: FastAPI):
                 if "kiosk" not in scols:
                     sync_conn.execute(text("ALTER TABLE sessions ADD COLUMN kiosk BOOLEAN NOT NULL DEFAULT FALSE"))
                     log.info("Added sessions.kiosk column")
+                ccols = {c["name"] for c in inspect(sync_conn).get_columns("calendar_events")}
+                _cal_adds = [
+                    ("end_time", "VARCHAR(5)"), ("category", "VARCHAR(24) NOT NULL DEFAULT 'general'"),
+                    ("location", "VARCHAR(160) NOT NULL DEFAULT ''"), ("recur", "VARCHAR(12) NOT NULL DEFAULT 'none'"),
+                    ("recur_days", "VARCHAR(20) NOT NULL DEFAULT ''"), ("recur_until", "VARCHAR(10)"),
+                    ("ical_uid", "VARCHAR(255)"), ("source", "VARCHAR(24) NOT NULL DEFAULT 'local'"),
+                ]
+                for cname, cdef in _cal_adds:
+                    if cname not in ccols:
+                        sync_conn.execute(text(f"ALTER TABLE calendar_events ADD COLUMN {cname} {cdef}"))
+                        log.info("Added calendar_events.%s column", cname)
             await conn.run_sync(_ensure_columns)
         log.info("Database tables ensured (%s)", settings.database_url.split("://")[0])
 
