@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
-    "build": "next build",
+    "build": "npm run lint:undef && next build",
     "start": "next start --port 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "lint:undef": "eslint -c lint-undef.mjs 'src/**/*.{js,jsx}'"
   },
   "dependencies": {
     "lucide-react": "^1.37.0",
@@ -20,6 +21,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "eslint": "^9.39.5",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.6.0"
   }

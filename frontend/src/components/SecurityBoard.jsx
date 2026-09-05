@@ -113,7 +113,7 @@ function useIsNarrow(bp = 760) {
 // labels: [{id, text, floor, x, z}] — draggable in edit mode, dbl-tap to
 // rename. view: {zoom, tx, tz} initial camera state. onView fires
 // (debounced upstream) so zoom/pan persist per panel.
-function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow }) {
+function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow, themeTick }) {
   const mountRef = useRef();
   const zoomApi = useRef(null);
 
@@ -1002,6 +1002,7 @@ export default function SecurityBoard() {
       liveStateRef={liveStateRef} armedRef={armedRef} selectedRef={selectedRef} editRef={editRef}
       floorView={floorView} onPick={setSelected} onMoved={onMoved}
       onLabelMoved={onLabelMoved} onLabelRename={onLabelRename} onView={onView} narrow={narrow}
+      themeTick={themeTick}
     />
   );
 

@@ -9,6 +9,7 @@ import {
 import { API_URL, callService } from "@/lib/api";
 import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState } from "@/lib/planScene";
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
+import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
 import { useHomeHub } from "@/lib/useHomeHub";
 
@@ -67,7 +68,7 @@ function colorFor(type, live, armed) {
   return C.secure;
 }
 
-function Board({ plan, placements, labels, liveStateRef, armedRef, floorView }) {
+function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, themeTick }) {
   const mountRef = useRef();
   useEffect(() => {
     const mount = mountRef.current;
@@ -644,7 +645,7 @@ export default function WallPanel() {
     ),
     board: (
       <Tile title="Home Map" edit={edit} onToggleVisible={()=>setVisible("board",false)} style={{padding:0}}>
-        <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView}/></div>
+        <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView} themeTick={themeTick}/></div>
         <div style={{position:"absolute", top:12, left:14, fontSize:11, fontWeight:700, letterSpacing:1.3, textTransform:"uppercase", color:C.sub}}>Home Map</div>
         {!edit && (
           <div style={{position:"absolute", left:12, bottom:12, display:"flex", gap:6}}>
