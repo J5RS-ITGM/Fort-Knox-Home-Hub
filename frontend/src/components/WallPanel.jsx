@@ -31,7 +31,10 @@ let C = {
   edge:"#262c3b", text:"#eef1f6", sub:"#9199a8", subDim:"#5a616f",
   floor:"#1a1f2d", floorEdge:"#2a3042", roomFloor:"#212838", wall:"#323a4e",
 };
-const hx = (h) => new THREE.Color(h);
+const hx = (h) => {
+  try { return new THREE.Color(h && String(h).trim() ? h : "#243040"); }
+  catch { return new THREE.Color("#243040"); }
+};
 
 // ================= SECURITY BOARD =====================
 // Board placements keyed by REAL backend entity_ids. Positions are static
@@ -421,10 +424,16 @@ function Tile({ title, children, edit, onToggleVisible, style }) {
 
 export default function WallPanel() {
   // Re-theme the WebGL palette when the theme changes (event from useTheme).
+  // Seed the WebGL palette from the current theme synchronously (before the
+  // scene effect runs), then bump themeTick on later theme changes so the
+  // scene rebuilds. Seeding in render (not an effect) guarantees C is themed
+  // before any hx() call in the scene builder.
   const [themeTick, setThemeTick] = useState(0);
+  if (typeof window !== "undefined") {
+    try { C = { ...C, ...webglSurfaces() }; } catch { /* keep default palette */ }
+  }
   useEffect(() => {
-    const apply = () => { C = { ...C, ...webglSurfaces() }; setThemeTick((t) => t + 1); };
-    apply();
+    const apply = () => { try { C = { ...C, ...webglSurfaces() }; } catch {} setThemeTick((t) => t + 1); };
     window.addEventListener("hh-theme", apply);
     return () => window.removeEventListener("hh-theme", apply);
   }, []);

@@ -32,7 +32,10 @@ let C = {
   lowbat:"#d9a441", floor:"#20242e", floorEdge:"#2c3140", wall:"#2a2f3b",
   bg0:"#0f1116", bg1:"#161922", text:"#e8ebf2", sub:"#8a91a0", accent:"#6b8afd",
 };
-const hx = (h) => new THREE.Color(h);
+const hx = (h) => {
+  try { return new THREE.Color(h && String(h).trim() ? h : "#243040"); }
+  catch { return new THREE.Color("#243040"); }
+};
 const FLOOR_H = 2.2;
 
 const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO" };
@@ -594,10 +597,16 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
 }
 
 export default function SecurityBoard() {
+  // Seed the WebGL palette from the current theme synchronously (before the
+  // scene effect runs), then bump themeTick on later theme changes so the
+  // scene rebuilds. Seeding in render (not an effect) guarantees C is themed
+  // before any hx() call in the scene builder.
   const [themeTick, setThemeTick] = useState(0);
+  if (typeof window !== "undefined") {
+    try { C = { ...C, ...webglSurfaces() }; } catch { /* keep default palette */ }
+  }
   useEffect(() => {
-    const apply = () => { C = { ...C, ...webglSurfaces() }; setThemeTick((t) => t + 1); };
-    apply();
+    const apply = () => { try { C = { ...C, ...webglSurfaces() }; } catch {} setThemeTick((t) => t + 1); };
     window.addEventListener("hh-theme", apply);
     return () => window.removeEventListener("hh-theme", apply);
   }, []);

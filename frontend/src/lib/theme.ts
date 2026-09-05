@@ -51,23 +51,51 @@ export function resolvedPalette(): Record<string, string> {
 /** Surface colors for the WebGL boards, resolved from the current theme.
  *  Status colors (secure/open/motion) stay fixed in the components; only
  *  the surfaces follow the theme so the 3D scene matches the 2D chrome.
- *  Call on mount and on the `hh-theme` event. */
+ *  Every value is guaranteed a valid #rrggbb — CSS vars can resolve to
+ *  "", "rgb(...)", or a whitespace-padded string depending on timing and
+ *  browser, and THREE.Color throws on anything it can't parse, which would
+ *  crash the whole WebGL mount. */
+function toHex(raw: string, fallback: string): string {
+  const v = (raw || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) {
+    return "#" + v.slice(1).split("").map((c) => c + c).join("");
+  }
+  const m = v.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+  if (m) {
+    const h = (n: string) => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, "0");
+    return `#${h(m[1])}${h(m[2])}${h(m[3])}`;
+  }
+  return fallback;
+}
+
 export function webglSurfaces(): Record<string, string> {
-  const p = resolvedPalette();
-  const field = p.field.toLowerCase();
-  const isLight = ["#e", "#f", "#d"].some((h) => field.startsWith(h));
+  const DEF = {
+    bg0: "#0c1117", bg1: "#141b24", card: "#141b24", cardHi: "#1a2330",
+    edge: "#243040", text: "#e8edf2", sub: "#7e8c9c", subDim: "#7e8c9c",
+    floor: "#141b24", floorEdge: "#243040", roomFloor: "#1a2330", wall: "#525f82",
+  };
+  if (typeof window === "undefined") return { ...DEF };
+  let p: Record<string, string>;
+  try {
+    p = resolvedPalette();
+  } catch {
+    return { ...DEF };
+  }
+  const field = toHex(p.field, DEF.bg0);
+  const isLight = ["#e", "#f", "#d"].some((h) => field.toLowerCase().startsWith(h));
   return {
-    bg0: p.field,
-    bg1: p.panel,
-    card: p.panel,
-    cardHi: p.panelRaised,
-    edge: p.line,
-    text: p.ink,
-    sub: p.inkMuted,
-    subDim: p.inkMuted,
-    floor: isLight ? "#dbe2ec" : p.panel,
-    floorEdge: p.line,
-    roomFloor: isLight ? "#e7edf4" : p.panelRaised,
+    bg0: field,
+    bg1: toHex(p.panel, DEF.bg1),
+    card: toHex(p.panel, DEF.card),
+    cardHi: toHex(p.panelRaised, DEF.cardHi),
+    edge: toHex(p.line, DEF.edge),
+    text: toHex(p.ink, DEF.text),
+    sub: toHex(p.inkMuted, DEF.sub),
+    subDim: toHex(p.inkMuted, DEF.subDim),
+    floor: isLight ? "#dbe2ec" : toHex(p.panel, DEF.floor),
+    floorEdge: toHex(p.line, DEF.floorEdge),
+    roomFloor: isLight ? "#e7edf4" : toHex(p.panelRaised, DEF.roomFloor),
     wall: isLight ? "#b8c2d0" : "#525f82",
   };
 }
