@@ -774,7 +774,7 @@ export default function WallPanel() {
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
       height: isMobile ? "auto" : "100dvh",
       minHeight: isMobile ? "calc(100dvh - 118px)" : undefined,
-      width: isMobile ? "100%" : "100vw", overflow:"hidden",
+      width: isMobile ? "100%" : "100vw", overflow: isMobile ? "visible" : "hidden",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       display:"flex", flexDirection:"column",
       paddingTop: isMobile ? 12 : "max(12px, env(safe-area-inset-top))",
@@ -828,14 +828,15 @@ export default function WallPanel() {
 
       {/* grid (desktop) / stack (mobile) */}
       {isMobile ? (
-        <div style={{ display:"flex", flexDirection:"column", gap:12, overflowY:"auto", flex:1, minHeight:0, paddingBottom:12 }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:14, paddingBottom:8 }}>
           {Object.keys(layout).filter(id => layout[id].visible)
             .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
             .map(id => {
-              // clock is short; board/radar want height; rest get a sensible min
-              const h = id === "clock" ? 64 : (id === "board" || id === "radar") ? 300 : 200;
+              // clock is short; board/radar want height; rest get a sensible min.
+              // min-height (not fixed) so nothing clips and padding stays even.
+              const minH = id === "clock" ? 72 : (id === "board" || id === "radar") ? 320 : 180;
               return (
-                <div key={id} style={{ height:h, flexShrink:0, position:"relative" }}>
+                <div key={id} style={{ minHeight:minH, flexShrink:0, position:"relative", display:"flex" }}>
                   {tileContent[id]}
                 </div>
               );

@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Activity, CalendarDays, ChefHat, ChevronLeft, Images, LayoutGrid, ListChecks, ListTodo, Menu, Shield, X } from "lucide-react";
+import { Activity, CalendarDays, ChefHat, ChevronLeft, Images, LayoutGrid, ListChecks, ListTodo, Menu, Shield, SlidersHorizontal, X } from "lucide-react";
 import { isKiosk, useMe } from "@/lib/auth";
 
 const LINKS: [string, string, React.ComponentType<{ size?: number }>][] = [
@@ -18,6 +18,7 @@ const LINKS: [string, string, React.ComponentType<{ size?: number }>][] = [
   ["/gallery", "Gallery", Images],
   ["/chores", "Chores", ListChecks],
   ["/todo", "To-Do", ListTodo],
+  ["/control", "Control", SlidersHorizontal],
   ["/recipes", "Recipes", ChefHat],
   ["/sensors", "Sensors", Activity],
 ];

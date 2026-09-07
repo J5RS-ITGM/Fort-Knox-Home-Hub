@@ -11,7 +11,7 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   Activity, CalendarDays, ChefHat, Images, LayoutGrid, ListChecks, ListTodo,
-  LogOut, MonitorSmartphone, MoreHorizontal, Settings, Shield, X,
+  LogOut, MonitorSmartphone, MoreHorizontal, Settings, Shield, SlidersHorizontal, X,
 } from "lucide-react";
 import AlarmControl from "@/components/AlarmControl";
 import KioskGate from "@/components/KioskGate";
@@ -28,6 +28,7 @@ const PRIMARY: [string, string, React.ComponentType<{ size?: number }>][] = [
   ["/todo", "To-Do", ListTodo],
 ];
 const MORE: [string, string, React.ComponentType<{ size?: number }>][] = [
+  ["/control", "Control", SlidersHorizontal],
   ["/security", "Security", Shield],
   ["/gallery", "Gallery", Images],
   ["/chores", "Chores", ListChecks],

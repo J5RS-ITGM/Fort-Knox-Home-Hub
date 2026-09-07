@@ -22,6 +22,7 @@ const NAV: [string, string][] = [
   ["/gallery", "Gallery"],
   ["/chores", "Chores"],
   ["/todo", "To-Do"],
+  ["/control", "Control"],
   ["/recipes", "Recipes"],
   ["/sensors", "Sensors"],
 ];
