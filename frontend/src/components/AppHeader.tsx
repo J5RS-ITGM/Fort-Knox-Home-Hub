@@ -41,7 +41,7 @@ export default function AppHeader() {
   const nav = NAV;
 
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-field/90 backdrop-blur">
+    <header className="sticky top-0 z-20 hidden border-b border-line bg-field/90 backdrop-blur sm:block">
       <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3">
         {/* Row 1 — brand · status · alarm · account */}
         <div className="flex items-center gap-2 sm:gap-4">

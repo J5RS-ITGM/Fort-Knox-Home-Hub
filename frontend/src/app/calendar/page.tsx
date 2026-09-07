@@ -547,7 +547,8 @@ export default function CalendarPage() {
       )}
       {canEdit && (
         <button onClick={() => setCreatingOn(today)} aria-label="Add event"
-          className="fixed bottom-24 right-5 z-40 grid size-14 place-items-center rounded-full border border-lamp/60 bg-lamp text-2xl font-bold text-field shadow-lg sm:hidden">
+          style={{ bottom: "calc(62px + env(safe-area-inset-bottom) + 16px)" }}
+          className="fixed right-5 z-50 grid size-14 place-items-center rounded-full border border-lamp/60 bg-lamp text-2xl font-bold text-field shadow-lg sm:hidden">
           +
         </button>
       )}

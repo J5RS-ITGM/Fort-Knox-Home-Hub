@@ -31,7 +31,7 @@ export default function PanelNav() {
   if (loading || isKiosk(me)) return null;
 
   return (
-    <div style={{ position: "fixed", top: "max(12px, env(safe-area-inset-top))", left: 12, zIndex: 45 }}>
+    <div className="hidden sm:block" style={{ position: "fixed", top: "max(12px, env(safe-area-inset-top))", left: 12, zIndex: 45 }}>
       {!open ? (
         <button
           onClick={() => setOpen(true)}

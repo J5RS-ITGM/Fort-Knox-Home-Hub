@@ -3,6 +3,7 @@ import "./globals.css";
 import SWRegister from "@/components/SWRegister";
 import SensorFlash from "@/components/SensorFlash";
 import ThemeProvider from "@/components/ThemeProvider";
+import MobileNav from "@/components/MobileNav";
 import { themeBootScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
@@ -29,7 +30,8 @@ export default function RootLayout({
         <ThemeProvider />
         <SWRegister />
         <SensorFlash />
-        {children}
+        <MobileNav />
+        <div className="mobile-nav-pad">{children}</div>
       </body>
     </html>
   );
