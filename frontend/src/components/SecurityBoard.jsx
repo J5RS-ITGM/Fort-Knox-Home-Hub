@@ -37,7 +37,8 @@ const hx = (h) => {
   try { return new THREE.Color(h && String(h).trim() ? h : "#243040"); }
   catch { return new THREE.Color("#243040"); }
 };
-const FLOOR_H = 3.6; // exploded separation between floors (was 2.2)
+const FLOOR_H = 3.6; // (retained for label drag math on legacy stacked refs)
+const SIDE_OFFSET = 9.0; // upstairs sits this far +X of the ground floor
 
 const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO" };
 
@@ -123,14 +124,16 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     let W = mount.clientWidth || 400, H = mount.clientHeight || 300;
 
     const scene = new THREE.Scene();
-    const d = narrow ? 6.5 : 8;
+    // Framing must fit two side-by-side floors (~SIDE_OFFSET apart), so the
+    // default view is wider and centered between them.
+    const d = narrow ? 11 : 13;
     const aspect = W / H;
     const cam = new THREE.OrthographicCamera(-d*aspect, d*aspect, d, -d, 0.1, 100);
 
     // Camera rig: iso offset from a pannable ground target, with ortho
     // zoom. Restored from the saved view; changes report up via onView.
-    const target = new THREE.Vector3(view?.tx ?? 0, 1.4, view?.tz ?? 0);
-    let zoom = Math.min(4, Math.max(0.5, view?.zoom ?? (narrow ? 1.6 : 1.9)));
+    const target = new THREE.Vector3(view?.tx ?? (SIDE_OFFSET / 2), 1.4, view?.tz ?? 0);
+    let zoom = Math.min(4, Math.max(0.5, view?.zoom ?? (narrow ? 1.0 : 1.25)));
     function applyCam() {
       cam.zoom = zoom;
       cam.position.set(target.x + 11, 12, target.z + 11);
@@ -193,15 +196,20 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       return g;
     }
 
+    // Floors sit SIDE BY SIDE (not stacked) so both read clearly. The
+    // upstairs is shifted +X by SIDE_OFFSET; its markers and labels get the
+    // same shift. Both floors stay at y≈0 (no vertical explosion).
     const floor0 = plan ? buildPlanFloor(plan, 0, 0) : buildFloor(0, 0);
-    const floor1 = plan2 ? buildPlanFloor(plan2, FLOOR_H, 1) : buildFloor(FLOOR_H, 1);
+    const floor1 = plan2 ? buildPlanFloor(plan2, 0, 1) : buildFloor(0, 1);
+    floor1.position.x = SIDE_OFFSET;
     scene.add(floor0, floor1);
+    const floorShiftX = (f) => (f === 1 ? SIDE_OFFSET : 0);
 
     const markerMeshes = [];
     sensors.forEach(s => {
-      const y = s.floor * FLOOR_H + 0.5;
+      const y = 0.5;
       const grp = new THREE.Group();
-      grp.position.set(s.x, y, s.z);
+      grp.position.set(s.x + floorShiftX(s.floor), y, s.z);
       const rad = narrow ? 0.30 : 0.22;
 
       const drop = new THREE.Mesh(
@@ -234,7 +242,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     (labels ?? []).forEach((l) => {
       const ghost = !l.text;
       const spr = makeLabel(ghost ? "· · name · ·" : l.text, ghost);
-      spr.position.set(l.x, l.floor * FLOOR_H + 1.15, l.z);
+      spr.position.set(l.x + (l.floor === 1 ? SIDE_OFFSET : 0), 1.15, l.z);
       spr.userData.labelId = l.id;
       scene.add(spr);
       labelMeshes.push({ id: l.id, floor: l.floor, ghost, spr });
@@ -305,12 +313,12 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         draggingLabel = lm;
         labelMoved = false;
         downAt = { x: e.clientX, y: e.clientY };
-        dragPlane.set(new THREE.Vector3(0,1,0), -(lm.floor * FLOOR_H + 1.15));
+        dragPlane.set(new THREE.Vector3(0,1,0), -1.15);
         renderer.domElement.setPointerCapture(e.pointerId);
         e.preventDefault();
       } else if (m) {
         dragging = m;
-        dragPlane.set(new THREE.Vector3(0,1,0), -(m.floor * FLOOR_H + 0.5));
+        dragPlane.set(new THREE.Vector3(0,1,0), -0.5);
         renderer.domElement.setPointerCapture(e.pointerId);
         e.preventDefault();
       } else {
@@ -332,7 +340,8 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         labelMoved = true;
         setPtr(e.clientX, e.clientY);
         if (ray.ray.intersectPlane(dragPlane, dragPoint)) {
-          draggingLabel.spr.position.x = Math.max(-6, Math.min(6, dragPoint.x));
+          const off = draggingLabel.floor === 1 ? SIDE_OFFSET : 0;
+          draggingLabel.spr.position.x = Math.max(-6 + off, Math.min(6 + off, dragPoint.x));
           draggingLabel.spr.position.z = Math.max(-6, Math.min(6, dragPoint.z));
         }
         return;
@@ -340,7 +349,8 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       if (dragging) {
         setPtr(e.clientX, e.clientY);
         if (ray.ray.intersectPlane(dragPlane, dragPoint)) {
-          dragging.grp.position.x = Math.max(-4.4, Math.min(4.4, dragPoint.x));
+          const off = dragging.floor === 1 ? SIDE_OFFSET : 0;
+          dragging.grp.position.x = Math.max(-4.4 + off, Math.min(4.4 + off, dragPoint.x));
           dragging.grp.position.z = Math.max(-3.65, Math.min(3.65, dragPoint.z));
         }
         return;
@@ -355,7 +365,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       if (pointers.size < 2) pinchDist = 0;
       if (draggingLabel) {
         if (labelMoved) {
-          onLabelMoved?.(draggingLabel.id, draggingLabel.spr.position.x, draggingLabel.spr.position.z);
+          onLabelMoved?.(draggingLabel.id, (draggingLabel.spr.position.x - (draggingLabel.floor === 1 ? SIDE_OFFSET : 0)), draggingLabel.spr.position.z);
         } else {
           // a tap: second tap on the same label within 400ms renames it
           const now = performance.now();
@@ -370,7 +380,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         return;
       }
       if (dragging) {
-        onMoved(dragging.id, dragging.grp.position.x, dragging.grp.position.z);
+        onMoved(dragging.id, (dragging.grp.position.x - (dragging.floor === 1 ? SIDE_OFFSET : 0)), dragging.grp.position.z);
         dragging = null;
         return;
       }
@@ -454,7 +464,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     zoomApi.current = {
       in: () => setZoom(zoom * 1.25),
       out: () => setZoom(zoom / 1.25),
-      reset: () => { target.set(0, 1.4, 0); setZoom(narrow ? 1.6 : 1.9, true); reportView(); },
+      reset: () => { target.set(SIDE_OFFSET / 2, 1.4, 0); setZoom(narrow ? 1.0 : 1.25, true); reportView(); },
     };
 
     return () => {

@@ -364,7 +364,6 @@ const rBtn = { width:42, height:42, borderRadius:11, background:C.cardHi, color:
 // ================= STATIC TILE CONTENT (pending modules) =====================
 const SCENES = [ ["Morning",Sun], ["Movie",Play], ["Away",Lock], ["Night",Moon] ];
 const EVENTS = [ ["7:30a","School drop-off"], ["1:00p","Dentist — Maya"], ["6:30p","Soccer practice"] ];
-const TASKS0 = [ ["Replace garage sensor battery","Eric",false], ["Order pool chlorine","Eric",false], ["Permission slip","Sam",true], ["Recycling","Kids",false] ];
 const FORECAST = [ ["Now","72°",Sun], ["1p","75°",Sun], ["2p","76°",Sun], ["3p","74°",Cloud], ["4p","71°",Cloud], ["5p","68°",Droplets] ];
 
 // ================= CLOCK =====================
@@ -507,7 +506,19 @@ export default function WallPanel() {
   }, [entities]);
 
   const [floorView, setFloorView] = useState("all");
-  const [tasks, setTasks] = useState(TASKS0);
+  // Panel Tasks tile = read-only summary of the To-Do list. Managed on the
+  // /todo page; here we just show the top open items.
+  const [tasks, setTasks] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch(`${API_URL}/api/todos`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => { if (alive) setTasks(rows.filter((t) => !t.done).slice(0, 6)); })
+      .catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
   const [showRadar, setShowRadar] = useState(false);
   const [edit, setEdit] = useState(false);
 
@@ -576,7 +587,6 @@ export default function WallPanel() {
     if (d.kind === "monitor") return;
     try { await callService(d.kind, "toggle", d.entity_id); } catch (e) { console.error(e); }
   };
-  const toggleTask = i => setTasks(t=>t.map((x,j)=> j===i?[x[0],x[1],!x[2]]:x));
 
   // ---- grid geometry ----
   const gridRef = useRef();
@@ -736,13 +746,16 @@ export default function WallPanel() {
     tasks: (
       <Tile title="Tasks" edit={edit} onToggleVisible={()=>setVisible("tasks",false)}>
         <div style={{display:"flex", flexDirection:"column", gap:1, justifyContent:"center", height:"100%"}}>
-          {tasks.map(([t,who,done],i)=>(
-            <div key={t} onClick={()=>!edit && toggleTask(i)} style={{display:"flex", alignItems:"center", gap:9, padding:"6px 0", cursor: edit?"default":"pointer"}}>
-              <div style={{width:19,height:19,borderRadius:6, border:`2px solid ${done?C.secure:C.subDim}`, background:done?C.secure:"transparent", display:"grid", placeItems:"center", flexShrink:0}}>{done && <CheckSquare size={11} color="#0c0e13"/>}</div>
-              <span style={{flex:1, fontSize:13, textDecoration:done?"line-through":"none", color:done?C.sub:C.text}}>{t}</span>
-              <span style={{fontSize:10, color:C.sub, background:C.cardHi, padding:"2px 8px", borderRadius:9}}>{who}</span>
+          {tasks.length === 0 && <span style={{fontSize:13, color:C.sub}}>No open tasks.</span>}
+          {tasks.map((t)=>(
+            <div key={t.id} style={{display:"flex", alignItems:"center", gap:9, padding:"6px 0"}}>
+              <div style={{width:17,height:17,borderRadius:5, border:`2px solid ${t.priority?C.open:C.subDim}`, flexShrink:0}}/>
+              <span style={{flex:1, fontSize:13, color:C.text}}>{t.title}</span>
             </div>
           ))}
+          {!edit && (
+            <a href="/todo" style={{marginTop:6, fontSize:11, color:C.accent, textDecoration:"none"}}>Manage tasks →</a>
+          )}
         </div>
       </Tile>
     ),

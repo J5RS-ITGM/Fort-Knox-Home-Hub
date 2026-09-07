@@ -35,7 +35,10 @@ const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default function CalendarPage() {
   const { me } = useMe();
   const canEdit = !isKiosk(me);
-  const [view, setView] = useState<"month" | "week" | "lanes" | "agenda">("month");
+  const [view, setView] = useState<"month" | "week" | "lanes" | "agenda" | "day">(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 640) return "agenda"; // mobile: readable default
+    return "month";
+  });
   const [anchor, setAnchor] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [members, setMembers] = useState<Member[]>([]);
@@ -104,6 +107,9 @@ export default function CalendarPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [rangeStart, rangeEnd] = useMemo(() => {
+    if (view === "day") {
+      return [dstr(weekAnchor), dstr(weekAnchor)];
+    }
     if (view === "agenda") {
       const start = new Date(weekAnchor);
       const end = new Date(weekAnchor); end.setDate(end.getDate() + 13);
@@ -207,14 +213,17 @@ export default function CalendarPage() {
     }
     return out;
   }, [weekAnchor, byDate, today]);
-  const title = (view === "week" || view === "lanes")
+  const title = view === "day"
+    ? weekAnchor.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })
+    : (view === "week" || view === "lanes")
     ? `Week of ${weekDays[0].toLocaleDateString([], { month: "short", day: "numeric" })}`
     : view === "agenda"
     ? `${weekAnchor.toLocaleDateString([], { month: "short", day: "numeric" })} — next 2 weeks`
     : anchor.toLocaleDateString([], { month: "long", year: "numeric" });
 
   const step = (dir: number) => {
-    if (view === "agenda") { const d = new Date(weekAnchor); d.setDate(d.getDate() + dir * 14); setWeekAnchor(d); }
+    if (view === "day") { const d = new Date(weekAnchor); d.setDate(d.getDate() + dir); setWeekAnchor(d); }
+    else if (view === "agenda") { const d = new Date(weekAnchor); d.setDate(d.getDate() + dir * 14); setWeekAnchor(d); }
     else if (view === "week" || view === "lanes") { const d = new Date(weekAnchor); d.setDate(d.getDate() + dir * 7); setWeekAnchor(d); }
     else setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + dir, 1));
   };
@@ -228,7 +237,7 @@ export default function CalendarPage() {
     <PageShell title="Family Calendar" active="/calendar" wide>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex w-full rounded-lg border border-line p-0.5 sm:w-auto">
-          {([["month","Month"],["week","Week"],["lanes","Lanes"],["agenda","Agenda"]] as const).map(([v, label]) => (
+          {([["agenda","Agenda"],["day","Day"],["week","Week"],["month","Month"],["lanes","Lanes"]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setView(v)}
               className={`flex-1 rounded-md font-medium sm:flex-none ${isKiosk(me) ? "px-5 py-2.5 text-sm" : "px-3 py-1.5 text-xs"} ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
           ))}
@@ -427,6 +436,43 @@ export default function CalendarPage() {
         </div>
       )}
 
+      {view === "day" && (
+        <div className="mx-auto max-w-xl">
+          {(() => {
+            const ds = dstr(weekAnchor);
+            const evs = byDate.get(ds) ?? [];
+            const timed = evs.filter((e) => e.time);
+            const allday = evs.filter((e) => !e.time);
+            return (
+              <div className="flex flex-col gap-2">
+                {allday.map((e) => (
+                  <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
+                    className="flex items-center gap-3 rounded-lg border-l-4 bg-panel px-3 py-2.5 text-left" style={{ borderColor: dot(e) }}>
+                    <span className="w-16 shrink-0 text-xs text-ink-muted">All day</span>
+                    <span className="flex-1 text-sm font-medium">{e.title}</span>
+                    {e.member_id && <span className="text-[11px] text-ink-muted">{memberById.get(e.member_id)?.name}</span>}
+                  </button>
+                ))}
+                {timed.map((e) => (
+                  <button key={e.id + e.date} onClick={() => canEdit && setEditing(e)}
+                    className="flex items-center gap-3 rounded-lg border-l-4 bg-panel px-3 py-3 text-left" style={{ borderColor: dot(e) }}>
+                    <span className="w-16 shrink-0 text-sm font-medium text-ink-muted">{e.time}</span>
+                    {e.member_id && <span className="grid size-7 shrink-0 place-items-center rounded-full text-sm" style={{ background: `${dot(e)}33`, border: `1.5px solid ${dot(e)}` }}>{memberById.get(e.member_id)?.emoji}</span>}
+                    <span className="flex-1">
+                      <span className="block text-sm font-medium">{e.title}</span>
+                      <span className="block text-[11px] text-ink-muted">
+                        {(e.member_id ? memberById.get(e.member_id)?.name : "Everyone")}{e.location ? ` · ${e.location}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {evs.length === 0 && <p className="rounded-lg border border-line bg-panel px-3 py-6 text-center text-sm text-ink-muted">Nothing scheduled.</p>}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {view === "agenda" && (
         <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
           <div className="flex flex-col gap-4 lg:order-1 order-2">
@@ -503,6 +549,12 @@ export default function CalendarPage() {
           onClose={() => { setEditing(null); setCreatingOn(null); }}
           onSaved={async () => { setEditing(null); setCreatingOn(null); await load(); }}
         />
+      )}
+      {canEdit && (
+        <button onClick={() => setCreatingOn(today)} aria-label="Add event"
+          className="fixed bottom-24 right-5 z-40 grid size-14 place-items-center rounded-full border border-lamp/60 bg-lamp text-2xl font-bold text-field shadow-lg sm:hidden">
+          +
+        </button>
       )}
     </PageShell>
   );

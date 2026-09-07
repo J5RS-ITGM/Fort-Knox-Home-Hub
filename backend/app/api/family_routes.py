@@ -557,3 +557,129 @@ async def delete_photo(
     except OSError:
         pass
     await audit(db, user.username, "photo_deleted", p.original or p.filename)
+
+
+# ============================ Recipes (manual) ===============================
+class RecipeIn(BaseModel):
+    title: str
+    category: str = ""
+    servings: str = ""
+    prep_time: str = ""
+    ingredients: str = ""
+    steps: str = ""
+    notes: str = ""
+
+
+@router.get("/recipes")
+async def list_recipes(db: AsyncSession = Depends(get_session)) -> list[dict]:
+    rows = (await db.execute(select(models.Recipe).order_by(models.Recipe.title))).scalars().all()
+    return [{"id": r.id, "title": r.title, "category": r.category, "servings": r.servings,
+             "prep_time": r.prep_time, "ingredients": r.ingredients, "steps": r.steps,
+             "notes": r.notes} for r in rows]
+
+
+@router.post("/recipes", status_code=201)
+async def create_recipe(body: RecipeIn, user: models.User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_session)) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to add recipes")
+    if not body.title.strip():
+        raise HTTPException(422, "title required")
+    r = models.Recipe(title=body.title.strip(), category=body.category.strip(),
+                      servings=body.servings.strip(), prep_time=body.prep_time.strip(),
+                      ingredients=body.ingredients, steps=body.steps, notes=body.notes)
+    db.add(r); await db.commit()
+    await audit(db, user.username, "recipe_added", r.title)
+    return {"id": r.id}
+
+
+@router.patch("/recipes/{rid}")
+async def patch_recipe(rid: str, body: RecipeIn, user: models.User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_session)) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to edit recipes")
+    r = await db.get(models.Recipe, rid)
+    if r is None:
+        raise HTTPException(404, "no such recipe")
+    r.title = body.title.strip() or r.title; r.category = body.category.strip()
+    r.servings = body.servings.strip(); r.prep_time = body.prep_time.strip()
+    r.ingredients = body.ingredients; r.steps = body.steps; r.notes = body.notes
+    await db.commit()
+    await audit(db, user.username, "recipe_updated", r.title)
+    return {"ok": True}
+
+
+@router.delete("/recipes/{rid}", status_code=204)
+async def delete_recipe(rid: str, user: models.User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_session)) -> None:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to delete recipes")
+    r = await db.get(models.Recipe, rid)
+    if r is None:
+        raise HTTPException(404, "no such recipe")
+    await db.delete(r); await db.commit()
+    await audit(db, user.username, "recipe_deleted", r.title)
+
+
+# ============================ To-Do ==========================================
+class TodoIn(BaseModel):
+    title: str
+    member_id: str | None = None
+    priority: int = 0
+
+
+@router.get("/todos")
+async def list_todos(db: AsyncSession = Depends(get_session)) -> list[dict]:
+    rows = (await db.execute(
+        select(models.Todo).order_by(models.Todo.done, models.Todo.priority.desc(),
+                                     models.Todo.sort, models.Todo.created_at)
+    )).scalars().all()
+    return [{"id": t.id, "title": t.title, "done": t.done, "member_id": t.member_id,
+             "priority": t.priority} for t in rows]
+
+
+@router.post("/todos", status_code=201)
+async def create_todo(body: TodoIn, user: models.User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_session)) -> dict:
+    if not body.title.strip():
+        raise HTTPException(422, "title required")
+    t = models.Todo(title=body.title.strip(), member_id=body.member_id, priority=1 if body.priority else 0)
+    db.add(t); await db.commit()
+    await audit(db, user.username, "todo_added", t.title)
+    return {"id": t.id}
+
+
+@router.post("/todos/{tid}/toggle")
+async def toggle_todo(tid: str, user: models.User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_session)) -> dict:
+    t = await db.get(models.Todo, tid)
+    if t is None:
+        raise HTTPException(404, "no such todo")
+    t.done = not t.done
+    await db.commit()
+    await audit(db, user.username, "todo_toggled", f"{t.title} -> {'done' if t.done else 'open'}")
+    return {"done": t.done}
+
+
+@router.delete("/todos/{tid}", status_code=204)
+async def delete_todo(tid: str, user: models.User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_session)) -> None:
+    t = await db.get(models.Todo, tid)
+    if t is None:
+        raise HTTPException(404, "no such todo")
+    await db.delete(t); await db.commit()
+    await audit(db, user.username, "todo_deleted", t.title)
+
+
+@router.post("/todos/clear-done", status_code=200)
+async def clear_done_todos(user: models.User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_session)) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to clear tasks")
+    rows = (await db.execute(select(models.Todo).where(models.Todo.done.is_(True)))).scalars().all()
+    n = len(rows)
+    for t in rows:
+        await db.delete(t)
+    await db.commit()
+    await audit(db, user.username, "todos_cleared", f"{n} done")
+    return {"cleared": n}

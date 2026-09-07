@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Activity, CalendarDays, Images, LayoutGrid, ListChecks, LockOpen, Shield } from "lucide-react";
+import { Activity, CalendarDays, ChefHat, Images, LayoutGrid, ListChecks, ListTodo, LockOpen, Shield } from "lucide-react";
 import KioskGate from "@/components/KioskGate";
 import { useMe , isKiosk } from "@/lib/auth";
 
@@ -17,6 +17,8 @@ const TABS = [
   { href: "/calendar", label: "Calendar", Icon: CalendarDays },
   { href: "/gallery", label: "Gallery", Icon: Images },
   { href: "/chores", label: "Chores", Icon: ListChecks },
+  { href: "/todo", label: "To-Do", Icon: ListTodo },
+  { href: "/recipes", label: "Recipes", Icon: ChefHat },
   { href: "/sensors", label: "Sensors", Icon: Activity },
 ];
 

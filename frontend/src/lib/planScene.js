@@ -129,7 +129,7 @@ export function buildPlanFloor(plan, y, floorIndex = 0) {
 
   // Walls: taller and more solid for legibility, with bright edge outlines.
   const wallMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(PLAN_C.wall), roughness: 0.85, transparent: true, opacity: 0.94,
+    color: new THREE.Color(PLAN_C.wall), roughness: 0.85, transparent: true, opacity: 0.55,
   });
   const wallEdgeMat = new THREE.LineBasicMaterial({ color: new THREE.Color(PLAN_C.wallEdge) });
   plan.walls.forEach((wall) => {
