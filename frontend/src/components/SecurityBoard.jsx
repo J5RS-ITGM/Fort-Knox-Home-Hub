@@ -114,7 +114,7 @@ function useIsNarrow(bp = 760) {
 // labels: [{id, text, floor, x, z}] — draggable in edit mode, dbl-tap to
 // rename. view: {zoom, tx, tz} initial camera state. onView fires
 // (debounced upstream) so zoom/pan persist per panel.
-function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow, themeTick }) {
+function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow, themeTick }) {
   const mountRef = useRef();
   const zoomApi = useRef(null);
 
@@ -194,7 +194,7 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
     }
 
     const floor0 = plan ? buildPlanFloor(plan, 0) : buildFloor(0, 0);
-    const floor1 = buildFloor(FLOOR_H, 1); // generic until a 2nd-floor OBJ exists
+    const floor1 = plan2 ? buildPlanFloor(plan2, FLOOR_H) : buildFloor(FLOOR_H, 1);
     scene.add(floor0, floor1);
 
     const markerMeshes = [];
@@ -470,7 +470,7 @@ function ThreeScene({ sensors, plan, labels, view, liveStateRef, armedRef, selec
       renderer.dispose();
       if (renderer.domElement.parentNode) mount.removeChild(renderer.domElement);
     };
-  }, [floorView, narrow, sensors, plan, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView, themeTick]);
+  }, [floorView, narrow, sensors, plan, plan2, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView, themeTick]);
 
   const zbtn = {
     width: 40, height: 40, display: "grid", placeItems: "center",
@@ -637,14 +637,19 @@ export default function SecurityBoard() {
     return () => { cancelled = true; };
   }, []);
 
-  // load the ground-floor 3D geometry (static asset from the Sweet Home 3D
-  // pipeline). null -> ThreeScene falls back to the generic demo geometry.
+  // load both floors' 3D geometry (static assets from the Sweet Home 3D
+  // pipeline). null -> ThreeScene falls back to generic geometry per floor.
   const [plan, setPlan] = useState(null);
+  const [plan2, setPlan2] = useState(null);
   useEffect(() => {
     let cancelled = false;
     fetch(PLAN_JSON_URL)
       .then((r) => (r.ok ? r.json() : null))
       .then((p) => { if (!cancelled && p?.walls && p?.rooms && p?.viewbox) setPlan(p); })
+      .catch(() => {});
+    fetch("/floorplans/second_floor.plan.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => { if (!cancelled && p?.walls && p?.rooms && p?.viewbox) setPlan2(p); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -991,7 +996,7 @@ export default function SecurityBoard() {
     />
   ) : (
     <ThreeScene
-      sensors={sensors} plan={plan} labels={labels} view={boardState.view}
+      sensors={sensors} plan={plan} plan2={plan2} labels={labels} view={boardState.view}
       liveStateRef={liveStateRef} armedRef={armedRef} selectedRef={selectedRef} editRef={editRef}
       floorView={floorView} onPick={setSelected} onMoved={onMoved}
       onLabelMoved={onLabelMoved} onLabelRename={onLabelRename} onView={onView} narrow={narrow}
