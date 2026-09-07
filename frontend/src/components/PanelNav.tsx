@@ -8,16 +8,16 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { CalendarDays, ChevronLeft, Home, Images, LayoutGrid, ListChecks, Menu, Shield, X } from "lucide-react";
+import { Activity, CalendarDays, ChevronLeft, Images, LayoutGrid, ListChecks, Menu, Shield, X } from "lucide-react";
 import { isKiosk, useMe } from "@/lib/auth";
 
 const LINKS: [string, string, React.ComponentType<{ size?: number }>][] = [
-  ["/", "Home", Home],
-  ["/chores", "Chores", ListChecks],
-  ["/calendar", "Calendar", CalendarDays],
-  ["/gallery", "Gallery", Images],
   ["/panel", "Panel", LayoutGrid],
   ["/security", "Security", Shield],
+  ["/calendar", "Calendar", CalendarDays],
+  ["/gallery", "Gallery", Images],
+  ["/chores", "Chores", ListChecks],
+  ["/sensors", "Sensors", Activity],
 ];
 
 export default function PanelNav() {
@@ -73,12 +73,12 @@ export default function PanelNav() {
               </a>
             );
           })}
-          <a href="/" style={{
+          <a href="/sensors" style={{
             display: "flex", alignItems: "center", gap: 8, textDecoration: "none",
             marginTop: 2, padding: "9px 10px", borderRadius: 8, fontSize: 12,
             color: "var(--color-ink-muted)", borderTop: "1px solid var(--color-line)",
           }}>
-            <ChevronLeft size={15} /> Back to dashboard
+            <ChevronLeft size={15} /> Sensors list
           </a>
         </div>
       )}

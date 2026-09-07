@@ -37,7 +37,7 @@ const hx = (h) => {
   try { return new THREE.Color(h && String(h).trim() ? h : "#243040"); }
   catch { return new THREE.Color("#243040"); }
 };
-const FLOOR_H = 2.2;
+const FLOOR_H = 3.6; // exploded separation between floors (was 2.2)
 
 const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO" };
 
@@ -614,6 +614,19 @@ export default function SecurityBoard() {
 
   const { entities, linkUp, bridgeUp } = useHomeHub();
   const [viewMode, setViewMode] = useState("iso"); // "iso" | "plan"
+  // Default view is a saved setting (Admin → Settings). Applied once on load
+  // unless the user has already toggled this session.
+  const viewModeTouched = useRef(false);
+  useEffect(() => {
+    fetch(`${API_URL}/api/ui-settings`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((v) => {
+        if (!viewModeTouched.current && (v.security_view === "plan" || v.security_view === "iso")) {
+          setViewMode(v.security_view);
+        }
+      })
+      .catch(() => {});
+  }, []);
   const [placements, setPlacements] = useState(null); // null = loading
   const [floorView, setFloorView] = useState("all");
   const [selected, setSelected] = useState(null);
@@ -880,7 +893,7 @@ export default function SecurityBoard() {
 
   const floorToggle = (
     <div style={{display:"flex", gap:6}}>
-      {viewMode === "iso" && [["all","All"],[1,"Upstairs"],[0,"Ground"]].map(([v,l])=>(
+      {[["all","All"],[1,"Upstairs"],[0,"Ground"]].map(([v,l])=>(
         <button key={String(v)} onClick={()=>setFloorView(v)} style={{
           background: floorView===v ? C.floorEdge : "rgba(20,23,31,0.7)",
           color: floorView===v ? C.text : C.sub,
@@ -895,7 +908,7 @@ export default function SecurityBoard() {
   const viewToggle = (
     <div style={{display:"flex", gap:6, background:"rgba(20,23,31,0.7)", borderRadius:9, padding:3, backdropFilter:"blur(6px)"}}>
       {[["plan","Floor plan"],["iso","3D"]].map(([v,l])=>(
-        <button key={v} onClick={()=>{ setViewMode(v); setSelected(null); }} style={{
+        <button key={v} onClick={()=>{ viewModeTouched.current = true; setViewMode(v); setSelected(null); }} style={{
           background: viewMode===v ? C.accent : "transparent",
           color: viewMode===v ? "#0f1116" : C.sub,
           border:"none", borderRadius:7, padding:"6px 13px", fontSize:12,

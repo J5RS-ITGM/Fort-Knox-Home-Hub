@@ -370,6 +370,8 @@ SETTING_KEYS = {
     "alert_rules",
     # appearance: theme preset (light|moderate|dark) + optional accent hex
     "theme_mode", "theme_accent",
+    # security board default view: "iso" (3D exploded) | "plan" (flat)
+    "security_view",
 }
 
 

@@ -7,17 +7,17 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { CalendarDays, Home, Images, LayoutGrid, ListChecks, LockOpen, Shield } from "lucide-react";
+import { Activity, CalendarDays, Images, LayoutGrid, ListChecks, LockOpen, Shield } from "lucide-react";
 import KioskGate from "@/components/KioskGate";
 import { useMe , isKiosk } from "@/lib/auth";
 
 const TABS = [
   { href: "/panel", label: "Panel", Icon: LayoutGrid },
   { href: "/security", label: "Security", Icon: Shield },
-  { href: "/chores", label: "Chores", Icon: ListChecks },
   { href: "/calendar", label: "Calendar", Icon: CalendarDays },
   { href: "/gallery", label: "Gallery", Icon: Images },
-  { href: "/", label: "Home", Icon: Home },
+  { href: "/chores", label: "Chores", Icon: ListChecks },
+  { href: "/sensors", label: "Sensors", Icon: Activity },
 ];
 
 export const BOTTOM_TABS_HEIGHT = 64; // px, excluding safe-area inset
@@ -30,7 +30,7 @@ export default function BottomTabs() {
   // know the role, render nothing (avoids a flash of the bar on desktop).
   const [gate, setGate] = useState(false);
   if (!isKiosk(me)) return null;
-  const tabs = TABS.filter((t) => t.href !== "/"); // kiosk: no dashboard
+  const tabs = TABS; // all destinations available in kiosk
   return (<>
     <nav
       aria-label="Panel navigation"

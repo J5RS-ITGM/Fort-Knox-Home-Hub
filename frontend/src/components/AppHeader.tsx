@@ -16,12 +16,12 @@ import { logout, useMe , isKiosk } from "@/lib/auth";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 const NAV: [string, string][] = [
-  ["/", "Home"],
-  ["/chores", "Chores"],
-  ["/calendar", "Calendar"],
-  ["/gallery", "Gallery"],
   ["/panel", "Panel"],
   ["/security", "Security"],
+  ["/calendar", "Calendar"],
+  ["/gallery", "Gallery"],
+  ["/chores", "Chores"],
+  ["/sensors", "Sensors"],
 ];
 
 export default function AppHeader() {

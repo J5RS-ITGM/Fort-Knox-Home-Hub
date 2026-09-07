@@ -555,11 +555,19 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
         </div>
         <p className="text-[11px] text-ink-muted">Preview applies live on this device; Save settings pushes it to every panel.</p>
 
+        <label className="mt-2 flex flex-col gap-1">
+          <span className="text-xs text-ink-muted">Security board default view</span>
+          <select className={input} value={form.security_view ?? "iso"} onChange={(e) => setForm({ ...form, security_view: e.target.value })}>
+            <option value="iso">3D exploded</option>
+            <option value="plan">Flat floor plan</option>
+          </select>
+        </label>
+
         <button disabled={busy} className={`${primary} mt-1 self-start`}
           onClick={() => {
             // send ONLY known editable fields — never echo back whatever the
             // GET returned (defense in depth against key leakage)
-            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules", "theme_mode", "theme_accent"];
+            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules", "theme_mode", "theme_accent", "security_view"];
             const values = Object.fromEntries(keys.map((key) => [key, form[key] ?? ""]));
             act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values }) }));
           }}>
