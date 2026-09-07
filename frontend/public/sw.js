@@ -6,8 +6,8 @@
  * Stale device state presented as fresh is worse than an offline banner,
  * so no API caching, period.
  */
-const STATIC_CACHE = "hh-static-v1";
-const PAGE_CACHE = "hh-pages-v1";
+const STATIC_CACHE = "hh-static-v2";
+const PAGE_CACHE = "hh-pages-v2";
 
 self.addEventListener("install", (e) => self.skipWaiting());
 self.addEventListener("activate", (e) => {

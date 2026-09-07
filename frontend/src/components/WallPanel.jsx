@@ -777,13 +777,12 @@ export default function WallPanel() {
 
   return (
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
-      height: isMobile ? "auto" : "100dvh",
-      width: "100%", maxWidth:"100%", overflow: isMobile ? "visible" : "hidden",
+      minHeight: "100dvh",
+      width: "100%", maxWidth:"100%", overflow:"visible",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       display:"flex", flexDirection:"column",
-      paddingTop: isMobile ? 12 : "max(12px, env(safe-area-inset-top))",
-      paddingBottom: isMobile ? 12 : `calc(${BOTTOM_TABS_HEIGHT}px + max(12px, env(safe-area-inset-bottom)))`,
-      paddingLeft: isMobile ? 12 : "max(12px, env(safe-area-inset-left))", paddingRight: isMobile ? 12 : "max(12px, env(safe-area-inset-right))",
+      padding: "12px",
+      paddingBottom:`calc(12px + env(safe-area-inset-bottom))`,
       boxSizing:"border-box" }}>
 
       {/* header */}
@@ -830,26 +829,24 @@ export default function WallPanel() {
         </div>
       )}
 
-      {/* grid (desktop) / stack (mobile) */}
-      {isMobile ? (
-        <div style={{ display:"flex", flexDirection:"column", gap:14, paddingBottom:8, width:"100%" }}>
-          {Object.keys(layout).filter(id => layout[id].visible)
-            .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
-            .map(id => {
-              // Canvas tiles (3D board, radar) need an explicit height. Everything
-              // else sizes to its content so nothing overflows or clips.
-              const fixed = (id === "board" || id === "radar") ? 320 : null;
-              return (
-                <div key={id} style={fixed
-                  ? { height:fixed, width:"100%", flexShrink:0, position:"relative", touchAction:"pan-y" }
-                  : { width:"100%", flexShrink:0, position:"relative" }}>
-                  {tileContent[id]}
-                </div>
-              );
-            })}
-        </div>
-      ) : (
-      <div ref={gridRef} style={{ position:"relative", flex:1, minHeight:0,
+      {/* grid (desktop) / stack (mobile) — CSS decides which shows, so it
+          can't be wrong regardless of how the PWA reports viewport size */}
+      <div className="panel-stack-mobile" style={{ display:"flex", flexDirection:"column", gap:14, paddingBottom:8, width:"100%" }}>
+        {Object.keys(layout).filter(id => layout[id].visible)
+          .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
+          .map(id => {
+            const fixed = (id === "board" || id === "radar") ? 320 : null;
+            return (
+              <div key={id} style={fixed
+                ? { height:fixed, width:"100%", flexShrink:0, position:"relative", touchAction:"pan-y" }
+                : { width:"100%", flexShrink:0, position:"relative" }}>
+                {tileContent[id]}
+              </div>
+            );
+          })}
+      </div>
+
+      <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", flex:1, minHeight:0,
         background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${cellH-1}px, rgba(107,138,253,0.06) ${cellH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
         borderRadius:12 }}>
         {Object.keys(layout).filter(id => layout[id].visible).map(id => {
@@ -871,7 +868,6 @@ export default function WallPanel() {
           );
         })}
       </div>
-      )}
 
       {showRadar && <LiveRadar onClose={()=>setShowRadar(false)}/>}
       <BottomTabs/>

@@ -85,12 +85,18 @@ html {
 }
 
 /* Nothing should cause horizontal scroll on the page itself; wide content
-   scrolls inside its own container. Set on body only (not html) and leave
-   vertical scrolling intact — setting overflow-x on <html> can lock
-   vertical scroll on iOS Safari. */
+   scrolls inside its own container. Vertical scrolling must always work,
+   including in the installed PWA (standalone display mode), where the
+   default scroll container behaves differently than in the browser. */
+html {
+  height: 100%;
+}
 body {
   max-width: 100%;
+  min-height: 100%;
   overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -138,4 +144,13 @@ body {
     padding-top: calc(56px + env(safe-area-inset-top));
     padding-bottom: calc(62px + env(safe-area-inset-bottom));
   }
+}
+
+/* Panel layout: CSS decides mobile stack vs desktop grid (bulletproof —
+   JS viewport detection was unreliable in the standalone PWA). */
+.panel-stack-mobile { display: none; }
+.panel-grid-desktop { display: block; }
+@media (max-width: 639px) {
+  .panel-stack-mobile { display: flex !important; }
+  .panel-grid-desktop { display: none !important; }
 }
