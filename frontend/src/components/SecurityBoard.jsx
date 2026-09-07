@@ -130,7 +130,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     // Camera rig: iso offset from a pannable ground target, with ortho
     // zoom. Restored from the saved view; changes report up via onView.
     const target = new THREE.Vector3(view?.tx ?? 0, 1.4, view?.tz ?? 0);
-    let zoom = Math.min(4, Math.max(0.5, view?.zoom ?? (narrow ? 1.15 : 1.35)));
+    let zoom = Math.min(4, Math.max(0.5, view?.zoom ?? (narrow ? 1.6 : 1.9)));
     function applyCam() {
       cam.zoom = zoom;
       cam.position.set(target.x + 11, 12, target.z + 11);
@@ -193,8 +193,8 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       return g;
     }
 
-    const floor0 = plan ? buildPlanFloor(plan, 0) : buildFloor(0, 0);
-    const floor1 = plan2 ? buildPlanFloor(plan2, FLOOR_H) : buildFloor(FLOOR_H, 1);
+    const floor0 = plan ? buildPlanFloor(plan, 0, 0) : buildFloor(0, 0);
+    const floor1 = plan2 ? buildPlanFloor(plan2, FLOOR_H, 1) : buildFloor(FLOOR_H, 1);
     scene.add(floor0, floor1);
 
     const markerMeshes = [];
@@ -234,7 +234,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     (labels ?? []).forEach((l) => {
       const ghost = !l.text;
       const spr = makeLabel(ghost ? "· · name · ·" : l.text, ghost);
-      spr.position.set(l.x, l.floor * FLOOR_H + 0.9, l.z);
+      spr.position.set(l.x, l.floor * FLOOR_H + 1.15, l.z);
       spr.userData.labelId = l.id;
       scene.add(spr);
       labelMeshes.push({ id: l.id, floor: l.floor, ghost, spr });
@@ -305,7 +305,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         draggingLabel = lm;
         labelMoved = false;
         downAt = { x: e.clientX, y: e.clientY };
-        dragPlane.set(new THREE.Vector3(0,1,0), -(lm.floor * FLOOR_H + 0.9));
+        dragPlane.set(new THREE.Vector3(0,1,0), -(lm.floor * FLOOR_H + 1.15));
         renderer.domElement.setPointerCapture(e.pointerId);
         e.preventDefault();
       } else if (m) {
@@ -454,7 +454,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     zoomApi.current = {
       in: () => setZoom(zoom * 1.25),
       out: () => setZoom(zoom / 1.25),
-      reset: () => { target.set(0, 1.4, 0); setZoom(narrow ? 1.15 : 1.35, true); reportView(); },
+      reset: () => { target.set(0, 1.4, 0); setZoom(narrow ? 1.6 : 1.9, true); reportView(); },
     };
 
     return () => {

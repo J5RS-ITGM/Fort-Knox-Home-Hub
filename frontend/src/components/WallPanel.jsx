@@ -118,7 +118,7 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     const FLOOR_H_P = 2.4;
     const floorGroups = { 0:new THREE.Group(), 1:new THREE.Group() };
     if (plan) {
-      floorGroups[0].add(buildPlanFloor(plan, 0));
+      floorGroups[0].add(buildPlanFloor(plan, 0, 0));
     } else {
       ROOMS[0].forEach(([cx,cz,w,dp,label]) => floorGroups[0].add(buildRoom(cx,cz,w,dp,0,label)));
     }

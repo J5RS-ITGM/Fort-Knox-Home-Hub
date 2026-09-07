@@ -45,6 +45,23 @@ for i, rm in enumerate(root.findall(".//room")):
         continue
     rooms_raw.append({"name": rm.get("name") or "", "pts": pts, "idx": i})
 
+# Doors & windows: pieceOfFurniture flagged doorOrWindow, or <doorOrWindow>.
+# Each has a center (x,y), a width, and an angle (radians; 0 or pi = runs
+# along X, pi/2 = runs along Y). We use these to cut openings in walls.
+doors_raw = []
+for d in root.findall(".//doorOrWindow") + [
+    p for p in root.findall(".//pieceOfFurniture") if p.get("doorOrWindow") == "true"
+]:
+    try:
+        doors_raw.append({
+            "x": float(d.get("x")), "y": float(d.get("y")),
+            "w": float(d.get("width", "91.44")),
+            "angle": float(d.get("angle", "0") or "0"),
+            "window": "window" in (d.get("name") or "").lower(),
+        })
+    except (TypeError, ValueError):
+        continue
+
 # --- coordinate system: reuse first-floor scale + origin if available -------
 all_x, all_y = [], []
 for w in walls_raw:
@@ -134,6 +151,69 @@ for r in rects:
                        "height_cm": round(r["height_cm"], 1)})
 plan_walls.extend(fills)  # chase fills render on top, closing the dead space
 
+# --- cut door / window openings ---------------------------------------------
+# For each opening, find the wall rect it sits on and split that rect into the
+# piece(s) on either side of the gap. Doors cut floor-to-header (full gap);
+# windows leave a sill+header so the wall reads as continuous with a hole.
+# Emitted as door markers too, so the 3D view can draw frame posts.
+door_px = []
+for d in doors_raw:
+    cx, cy = px(d["x"], d["y"])
+    half = (d["w"] * scale) / 2.0
+    horiz = abs(((d["angle"] % 3.14159) - 1.5708)) > 0.7854  # closer to 0/pi -> along X
+    door_px.append({"cx": cx, "cy": cy, "half": half, "horiz": horiz, "window": d["window"]})
+
+def _cut(rect, doors):
+    """Return a list of wall rects with door gaps removed from `rect`."""
+    out = [rect]
+    for dr in doors:
+        nxt = []
+        for w in out:
+            horiz = w["w"] >= w["h"]
+            # opening must run the same way as the wall and overlap it
+            if horiz and dr["horiz"]:
+                if abs((dr["cy"]) - (w["y"] + w["h"] / 2)) > w["h"] + 20:
+                    nxt.append(w); continue
+                gs, ge = dr["cx"] - dr["half"], dr["cx"] + dr["half"]
+                if ge <= w["x"] or gs >= w["x"] + w["w"]:
+                    nxt.append(w); continue
+                if dr["window"]:  # keep the wall (hole is vertical-only); no split
+                    nxt.append(w); continue
+                if gs > w["x"]:
+                    nxt.append({**w, "w": gs - w["x"]})
+                if ge < w["x"] + w["w"]:
+                    nxt.append({**w, "x": ge, "w": w["x"] + w["w"] - ge})
+            elif (not horiz) and (not dr["horiz"]):
+                if abs((dr["cx"]) - (w["x"] + w["w"] / 2)) > w["w"] + 20:
+                    nxt.append(w); continue
+                gs, ge = dr["cy"] - dr["half"], dr["cy"] + dr["half"]
+                if ge <= w["y"] or gs >= w["y"] + w["h"]:
+                    nxt.append(w); continue
+                if dr["window"]:
+                    nxt.append(w); continue
+                if gs > w["y"]:
+                    nxt.append({**w, "h": gs - w["y"]})
+                if ge < w["y"] + w["h"]:
+                    nxt.append({**w, "y": ge, "h": w["y"] + w["h"] - ge})
+            else:
+                nxt.append(w)
+        out = nxt
+    return out
+
+cut_walls = []
+for w in plan_walls:
+    for piece in _cut(w, door_px):
+        if piece["w"] > 1 and piece["h"] > 1:
+            cut_walls.append({"x": round(piece["x"], 1), "y": round(piece["y"], 1),
+                              "w": round(piece["w"], 1), "h": round(piece["h"], 1),
+                              "height_cm": piece["height_cm"]})
+plan_walls = cut_walls
+
+# door markers (frame posts + threshold) for the 3D view
+plan_doors = [{"cx": round(d["cx"], 1), "cy": round(d["cy"], 1),
+               "half": round(d["half"], 1), "horiz": d["horiz"],
+               "window": d["window"]} for d in door_px]
+
 # --- rooms: polygon -> bounding-box rect (matches 3D room-tile rendering) ---
 plan_rooms = []
 for r in rooms_raw:
@@ -152,8 +232,10 @@ plan = {
     "px_per_cm": round(scale, 4),
     "walls": plan_walls,
     "rooms": plan_rooms,
+    "doors": plan_doors,
 }
 with open(OUTFILE, "w") as f:
     json.dump(plan, f, indent=1)
-print(f"2nd floor: {vbW:.0f}x{vbH:.0f}px, {len(rects)} walls "
-      f"+ {len(fills)} chase fill(s), {len(plan_rooms)} rooms -> {OUTFILE}")
+print(f"2nd floor: {vbW:.0f}x{vbH:.0f}px, {len(plan_walls)} wall pieces "
+      f"+ {len(fills)} chase fill(s), {len(plan_rooms)} rooms, "
+      f"{len(plan_doors)} openings -> {OUTFILE}")

@@ -59,42 +59,61 @@ export const PLAN_C = {
 
 export function makeTextSprite(text, { ghost = false, scale = 1 } = {}) {
   const cv = document.createElement("canvas");
-  const dpr = 2; cv.width = 320 * dpr; cv.height = 80 * dpr;
+  const dpr = 2; cv.width = 360 * dpr; cv.height = 96 * dpr;
   const ctx = cv.getContext("2d");
   ctx.scale(dpr, dpr);
-  ctx.font = `${ghost ? "500 italic" : "600"} 26px 'DM Sans', system-ui, sans-serif`;
-  ctx.fillStyle = ghost ? "rgba(126,140,156,0.85)" : "rgba(236,240,247,0.96)";
+  // subtle rounded backing so labels stay legible over walls/floors
+  if (!ghost) {
+    ctx.fillStyle = "rgba(10,14,20,0.55)";
+    const w = 340, h = 46, x = 10, yy = 25, r = 12;
+    ctx.beginPath();
+    ctx.moveTo(x + r, yy); ctx.arcTo(x + w, yy, x + w, yy + h, r);
+    ctx.arcTo(x + w, yy + h, x, yy + h, r); ctx.arcTo(x, yy + h, x, yy, r);
+    ctx.arcTo(x, yy, x + w, yy, r); ctx.closePath(); ctx.fill();
+  }
+  ctx.font = `${ghost ? "500 italic" : "700"} 32px 'DM Sans', system-ui, sans-serif`;
+  ctx.fillStyle = ghost ? "rgba(150,164,182,0.85)" : "rgba(240,244,250,0.98)";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.shadowColor = "rgba(0,0,0,0.8)"; ctx.shadowBlur = 7;
-  ctx.fillText(text, 160, 40);
+  ctx.shadowColor = "rgba(0,0,0,0.9)"; ctx.shadowBlur = 6;
+  ctx.fillText(text, 180, 48);
   const tex = new THREE.CanvasTexture(cv);
   tex.minFilter = THREE.LinearFilter;
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
-  spr.scale.set(2.75 * scale, 0.69 * scale, 1);
+  spr.scale.set(3.4 * scale, 0.9 * scale, 1);
   return spr;
 }
 
-const WALL_STUB_H = 0.55;
+const WALL_H = 0.85; // taller than the old 0.55 stub for legibility
 
 /** Build one floor of real house geometry from the plan JSON.
  *  Returns a THREE.Group positioned at height y. Labels are NOT included —
  *  they're an interactive layer owned by the caller. */
-export function buildPlanFloor(plan, y) {
+export function buildPlanFloor(plan, y, floorIndex = 0) {
   const g = new THREE.Group();
   const ext = gridRect({ x: 0, y: 0, w: plan.viewbox[0], h: plan.viewbox[1] });
+  const upper = floorIndex > 0;
 
-  const slab = new THREE.Mesh(
-    new THREE.PlaneGeometry(ext.w, ext.d),
-    new THREE.MeshStandardMaterial({ color: new THREE.Color(PLAN_C.slab), roughness: 0.95 })
-  );
-  slab.rotation.x = -Math.PI / 2; slab.position.set(ext.cx, y, ext.cz); g.add(slab);
+  // Ground floor gets a filled slab; upper floors get only a faint outline
+  // frame (no opaque plane) so you can see the floor below through it.
+  if (!upper) {
+    const slab = new THREE.Mesh(
+      new THREE.PlaneGeometry(ext.w, ext.d),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(PLAN_C.slab), roughness: 0.95 })
+    );
+    slab.rotation.x = -Math.PI / 2; slab.position.set(ext.cx, y, ext.cz); g.add(slab);
+  }
   const slabEdge = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.PlaneGeometry(ext.w, ext.d)),
-    new THREE.LineBasicMaterial({ color: new THREE.Color(PLAN_C.slabEdge) })
+    new THREE.LineBasicMaterial({ color: new THREE.Color(PLAN_C.slabEdge), transparent: upper, opacity: upper ? 0.5 : 1 })
   );
   slabEdge.rotation.x = -Math.PI / 2; slabEdge.position.set(ext.cx, y + 0.001, ext.cz); g.add(slabEdge);
 
-  const roomMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(PLAN_C.room), roughness: 0.92 });
+  // Room floor tiles: on upper floors make them lightly translucent so the
+  // downstairs still reads through when viewing "all".
+  const roomMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(PLAN_C.room), roughness: 0.92,
+    transparent: upper, opacity: upper ? 0.35 : 1,
+  });
   const roomEdgeMat = new THREE.LineBasicMaterial({ color: new THREE.Color(PLAN_C.roomEdge) });
   plan.rooms.forEach((r) => {
     const rr = gridRect(r);
@@ -108,21 +127,43 @@ export function buildPlanFloor(plan, y) {
     g.add(edge);
   });
 
-  // Walls: near-solid, with bright edge outlines that read from the iso
-  // camera — this is what makes the footprint legible.
+  // Walls: taller and more solid for legibility, with bright edge outlines.
   const wallMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(PLAN_C.wall), roughness: 0.85, transparent: true, opacity: 0.92,
+    color: new THREE.Color(PLAN_C.wall), roughness: 0.85, transparent: true, opacity: 0.94,
   });
   const wallEdgeMat = new THREE.LineBasicMaterial({ color: new THREE.Color(PLAN_C.wallEdge) });
   plan.walls.forEach((wall) => {
     const rr = gridRect(wall);
-    const geo = new THREE.BoxGeometry(Math.max(rr.w, 0.07), WALL_STUB_H, Math.max(rr.d, 0.07));
+    const geo = new THREE.BoxGeometry(Math.max(rr.w, 0.07), WALL_H, Math.max(rr.d, 0.07));
     const m = new THREE.Mesh(geo, wallMat);
-    m.position.set(rr.cx, y + WALL_STUB_H / 2, rr.cz);
+    m.position.set(rr.cx, y + WALL_H / 2, rr.cz);
     g.add(m);
     const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), wallEdgeMat);
     e.position.copy(m.position);
     g.add(e);
+  });
+
+  // Door / window openings: draw two short frame posts at the edges of each
+  // gap (and a threshold line) so the opening reads as a real doorway.
+  const postMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(PLAN_C.wallEdge) });
+  (plan.doors ?? []).forEach((d) => {
+    const c = gridRect({ x: d.cx - 2, y: d.cy - 2, w: 4, h: 4 });
+    const gp = gridRect({ x: d.cx - d.half, y: d.cy - d.half, w: d.half * 2, h: d.half * 2 });
+    const span = d.horiz ? Math.abs(gp.w) : Math.abs(gp.d);
+    const postH = d.window ? WALL_H * 0.5 : WALL_H;
+    const postY = d.window ? y + WALL_H * 0.55 : y + postH / 2;
+    [-1, 1].forEach((side) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, postH, 0.08), postMat);
+      if (d.horiz) post.position.set(c.cx + side * (span / 2), postY, c.cz);
+      else post.position.set(c.cx, postY, c.cz + side * (span / 2));
+      g.add(post);
+    });
+    // header beam across the top of the opening
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(d.horiz ? span : 0.08, 0.08, d.horiz ? 0.08 : span), postMat
+    );
+    beam.position.set(c.cx, y + WALL_H, c.cz);
+    g.add(beam);
   });
   return g;
 }
