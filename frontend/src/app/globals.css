@@ -84,10 +84,11 @@ html {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Nothing should ever cause horizontal scroll on the page itself. Wide
-   content (tables, plans) must scroll inside its own container, not the
-   body — this is the iOS Safari fix for stray horizontal scrolling. */
-html, body {
+/* Nothing should cause horizontal scroll on the page itself; wide content
+   scrolls inside its own container. Set on body only (not html) and leave
+   vertical scrolling intact — setting overflow-x on <html> can lock
+   vertical scroll on iOS Safari. */
+body {
   max-width: 100%;
   overflow-x: hidden;
 }

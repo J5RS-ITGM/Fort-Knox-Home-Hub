@@ -377,8 +377,9 @@ function ClockStrip() {
   const secs = now.toLocaleTimeString([], { second: "2-digit" }).padStart(2, "0");
   const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   return (
-    <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", gap:16, padding:"0 18px",
-                  background:C.card, border:`1px solid ${C.edge}`, borderRadius:12 }}>
+    <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", gap:14, flexWrap:"wrap",
+                  padding:"16px 20px", boxSizing:"border-box",
+                  background:C.card, border:`1px solid ${C.edge}`, borderRadius:16 }}>
       <span style={{ fontSize:34, fontWeight:800, color:C.text, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{time}</span>
       <span style={{ fontSize:15, fontWeight:700, color:C.subDim, fontVariantNumeric:"tabular-nums" }}>:{secs}</span>
       <span style={{ fontSize:16, fontWeight:600, color:C.sub }}>{date}</span>
@@ -505,7 +506,7 @@ export default function WallPanel() {
     return rows;
   }, [entities]);
 
-  const [floorView, setFloorView] = useState("all");
+  const [floorView, setFloorView] = useState(0);
   // Panel Tasks tile = read-only summary of the To-Do list. Managed on the
   // /todo page; here we just show the top open items.
   const [tasks, setTasks] = useState([]);
@@ -656,22 +657,26 @@ export default function WallPanel() {
   // ---- tile content ----
   const tileContent = {
     clock: (
-      <Tile title="Clock" edit={edit} onToggleVisible={()=>setVisible("clock",false)} style={{padding:0}}>
+      <div style={{ position:"relative", height:"100%" }}>
         <ClockStrip/>
-      </Tile>
+        {edit && <button onClick={()=>setVisible("clock",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer"}}><EyeOff size={15}/></button>}
+      </div>
     ),
     board: (
-      <Tile title="Home Map" edit={edit} onToggleVisible={()=>setVisible("board",false)} style={{padding:0}}>
+      <Tile edit={edit} onToggleVisible={()=>setVisible("board",false)} style={{padding:0}}>
         <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView} themeTick={themeTick}/></div>
-        <div style={{position:"absolute", top:12, left:14, fontSize:11, fontWeight:700, letterSpacing:1.3, textTransform:"uppercase", color:C.sub}}>Home Map</div>
+        <div style={{position:"absolute", top:14, left:16, fontSize:11, fontWeight:700, letterSpacing:1.3, textTransform:"uppercase", color:C.sub}}>Home Map</div>
+        {edit && <button onClick={()=>setVisible("board",false)} style={{position:"absolute", top:12, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer"}}><EyeOff size={15}/></button>}
+        {/* floor tabs — stacked, below the title, clear of the legend */}
         {!edit && (
-          <div style={{position:"absolute", left:12, bottom:12, display:"flex", gap:6}}>
-            {[["all","All"],[1,"Up"],[0,"Ground"]].map(([v,l])=>(
-              <button key={String(v)} onClick={()=>setFloorView(v)} style={{ background: floorView===v?C.cardHi:"rgba(18,21,31,0.8)", color: floorView===v?C.text:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"8px 14px", fontSize:12, cursor:"pointer", fontWeight:600, backdropFilter:"blur(6px)" }}>{l}</button>
+          <div style={{position:"absolute", top:40, left:12, display:"flex", flexDirection:"column", gap:6}}>
+            {[[0,"First"],[1,"Second"]].map(([v,l])=>(
+              <button key={String(v)} onClick={()=>setFloorView(v)} style={{ background: floorView===v?C.accent:"rgba(18,21,31,0.85)", color: floorView===v?"#0c0e13":C.sub, border:`1px solid ${floorView===v?C.accent:C.edge}`, borderRadius:9, padding:"8px 16px", fontSize:12, cursor:"pointer", fontWeight:700, minWidth:78, textAlign:"center" }}>{l}</button>
             ))}
           </div>
         )}
-        <div style={{position:"absolute", right:12, bottom:12, display:"flex", gap:12, background:"rgba(18,21,31,0.8)", padding:"7px 12px", borderRadius:10}}>
+        {/* status legend — bottom-right, its own pill */}
+        <div style={{position:"absolute", right:12, bottom:12, display:"flex", gap:12, background:"rgba(18,21,31,0.85)", padding:"7px 12px", borderRadius:10}}>
           {[[C.open,summary.open,"open"],[C.motion,summary.motion,"motion"],[C.amber,summary.low,"low"]].map(([c,n,l])=>(
             <div key={l} style={{display:"flex", alignItems:"center", gap:5}}>
               <span style={{width:8,height:8,borderRadius:8,background:c}}/><span style={{fontSize:13, fontWeight:800}}>{n}</span><span style={{fontSize:10, color:C.sub}}>{l}</span>
