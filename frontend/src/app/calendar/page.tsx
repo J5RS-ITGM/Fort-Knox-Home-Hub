@@ -104,7 +104,6 @@ export default function CalendarPage() {
     window.setTimeout(() => setSyncMsg(""), 7000);
   };
 
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [rangeStart, rangeEnd] = useMemo(() => {
     if (view === "day") {
@@ -179,14 +178,6 @@ export default function CalendarPage() {
     const next = new Set(set); next.has(key) ? next.delete(key) : next.add(key); setter(next);
   };
 
-  const importIcs = async (files: FileList | null) => {
-    if (!files?.length) return;
-    const body = new FormData(); body.append("file", files[0]);
-    const r = await fetch(`${API_URL}/api/events/import.ics`, { method: "POST", credentials: "include", body });
-    if (r.ok) { const d = await r.json(); window.alert(`Imported ${d.added} new, updated ${d.updated}.`); await load(); }
-    else window.alert("Import failed.");
-  };
-
   const monthCells = useMemo(() => {
     const first = new Date(anchor);
     const lead = (first.getDay() + 6) % 7;
@@ -235,72 +226,76 @@ export default function CalendarPage() {
 
   return (
     <PageShell title="Family Calendar" active="/calendar" wide>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex w-full rounded-lg border border-line p-0.5 sm:w-auto">
-          {([["agenda","Agenda"],["day","Day"],["week","Week"],["month","Month"],["lanes","Lanes"]] as const).map(([v, label]) => (
-            <button key={v} onClick={() => setView(v)}
-              className={`flex-1 rounded-md font-medium sm:flex-none ${isKiosk(me) ? "px-5 py-2.5 text-sm" : "px-3 py-1.5 text-xs"} ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(-1)}>&larr;</button>
-          <span className="min-w-32 text-center text-sm font-semibold sm:min-w-40">{title}</span>
-          <button className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:text-ink" onClick={() => step(1)}>&rarr;</button>
-          <button className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink"
-            onClick={() => { setAnchor(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setWeekAnchor(new Date()); }}>Today</button>
-        </div>
+      {/* Row 1: view switcher (full width, wraps, never scrolls) */}
+      <div className="mb-3 grid grid-cols-5 gap-1 rounded-lg border border-line p-1">
+        {([["agenda","Agenda"],["day","Day"],["week","Week"],["month","Month"],["lanes","Lanes"]] as const).map(([v, label]) => (
+          <button key={v} onClick={() => setView(v)}
+            className={`rounded-md py-2 text-center text-xs font-medium ${view === v ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>{label}</button>
+        ))}
+      </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {canEdit && (
-            <button onClick={() => scheduleFileRef.current?.click()} disabled={extracting}
-              className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink disabled:opacity-50">
-              {extracting ? "Reading…" : "📷 Import schedule"}
-            </button>
-          )}
+      {/* Row 2: big prev / title / next, then actions */}
+      <div className="mb-3 flex items-center gap-2">
+        <button aria-label="Previous" onClick={() => step(-1)}
+          className="grid size-11 shrink-0 place-items-center rounded-lg border border-line text-xl text-ink hover:border-lamp/50 active:scale-95">‹</button>
+        <span className="flex-1 text-center text-sm font-semibold">{title}</span>
+        <button aria-label="Next" onClick={() => step(1)}
+          className="grid size-11 shrink-0 place-items-center rounded-lg border border-line text-xl text-ink hover:border-lamp/50 active:scale-95">›</button>
+        <button onClick={() => { setAnchor(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setWeekAnchor(new Date()); }}
+          className="shrink-0 rounded-lg border border-line px-3 py-2.5 text-xs text-ink-muted hover:text-ink">Today</button>
+      </div>
+
+      {/* Row 3: actions — icons only, compact. Import photo, Sync, Add. */}
+      {canEdit && (
+        <div className="mb-3 flex items-center gap-2">
+          <button onClick={() => scheduleFileRef.current?.click()} disabled={extracting} title="Import schedule photo"
+            className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-xs text-ink-muted hover:text-ink disabled:opacity-50">
+            <span>📷</span><span className="hidden sm:inline">{extracting ? "Reading…" : "Import photo"}</span>
+          </button>
           <input ref={scheduleFileRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic" hidden
             onChange={(e) => { void extractSchedule(e.target.files); e.target.value = ""; }} />
-          {canEdit && (
-            <button onClick={() => runSync()} disabled={syncing}
-              className="rounded-md border border-lamp/60 bg-lamp/10 px-3 py-1.5 text-xs font-semibold text-lamp disabled:opacity-50">
-              {syncing ? "Syncing…" : "↻ Sync Google"}
-            </button>
-          )}
-          <a href={`${API_URL}/api/events/export.ics`} download className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink">Export .ics</a>
-          {canEdit && <>
-            <button onClick={() => fileRef.current?.click()} className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink">Import .ics</button>
-            <input ref={fileRef} type="file" accept=".ics,text/calendar" hidden onChange={(e) => { void importIcs(e.target.files); e.target.value = ""; }} />
-            <button onClick={() => setCreatingOn(today)} className="rounded-md border border-lamp/60 bg-lamp/10 px-3 py-1.5 text-xs font-semibold text-lamp">+ Event</button>
-          </>}
+          <button onClick={() => runSync()} disabled={syncing} title="Sync Google Calendar"
+            className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-xs text-ink-muted hover:text-ink disabled:opacity-50">
+            <span>↻</span><span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync"}</span>
+          </button>
+          <button onClick={() => setCreatingOn(today)}
+            className="ml-auto rounded-lg border border-lamp/60 bg-lamp/10 px-4 py-2 text-xs font-semibold text-lamp">+ Event</button>
         </div>
-      </div>
+      )}
       {syncMsg && <div className="mb-2 text-xs text-ink-muted">{syncMsg}</div>}
 
-      <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        {members.map((m) => {
-          const on = memberFilter.has(m.id);
-          return (
-            <button key={m.id} onClick={() => toggle(memberFilter, m.id, setMemberFilter)}
-              className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
-              style={{ borderColor: on ? m.color : "var(--color-line)", background: on ? `${m.color}22` : "transparent", color: on ? "var(--color-ink)" : "var(--color-ink-muted)" }}>
-              <span className="size-2 rounded-full" style={{ background: m.color }} /> {m.emoji} {m.name}
-            </button>
-          );
-        })}
-        <span className="mx-1 h-4 w-px bg-line" />
-        {CATS.filter((c) => c.key !== "general").map((c) => {
-          const on = catFilter.has(c.key);
-          return (
-            <button key={c.key} onClick={() => toggle(catFilter, c.key, setCatFilter)}
-              className="rounded-full border px-2.5 py-1 text-xs transition-colors"
-              style={{ borderColor: on ? c.color : "var(--color-line)", background: on ? `${c.color}22` : "transparent", color: on ? "var(--color-ink)" : "var(--color-ink-muted)" }}>
-              {c.label}
-            </button>
-          );
-        })}
-        {(memberFilter.size > 0 || catFilter.size > 0) && (
-          <button onClick={() => { setMemberFilter(new Set()); setCatFilter(new Set()); }} className="ml-1 text-xs text-ink-muted underline">clear</button>
-        )}
-      </div>
+      {/* Filters: wrap, never scroll horizontally */}
+      <details className="mb-4 rounded-lg border border-line">
+        <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-ink-muted">
+          Filter{(memberFilter.size + catFilter.size) > 0 ? ` · ${memberFilter.size + catFilter.size} active` : ""}
+        </summary>
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3">
+          {members.map((m) => {
+            const on = memberFilter.has(m.id);
+            return (
+              <button key={m.id} onClick={() => toggle(memberFilter, m.id, setMemberFilter)}
+                className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors"
+                style={{ borderColor: on ? m.color : "var(--color-line)", background: on ? `${m.color}22` : "transparent", color: on ? "var(--color-ink)" : "var(--color-ink-muted)" }}>
+                <span className="size-2 rounded-full" style={{ background: m.color }} /> {m.emoji} {m.name}
+              </button>
+            );
+          })}
+          <span className="mx-1 h-4 w-px bg-line" />
+          {CATS.filter((c) => c.key !== "general").map((c) => {
+            const on = catFilter.has(c.key);
+            return (
+              <button key={c.key} onClick={() => toggle(catFilter, c.key, setCatFilter)}
+                className="rounded-full border px-2.5 py-1 text-xs transition-colors"
+                style={{ borderColor: on ? c.color : "var(--color-line)", background: on ? `${c.color}22` : "transparent", color: on ? "var(--color-ink)" : "var(--color-ink-muted)" }}>
+                {c.label}
+              </button>
+            );
+          })}
+          {(memberFilter.size > 0 || catFilter.size > 0) && (
+            <button onClick={() => { setMemberFilter(new Set()); setCatFilter(new Set()); }} className="ml-1 text-xs text-ink-muted underline">clear</button>
+          )}
+        </div>
+      </details>
 
       {view === "month" && (
         <div>

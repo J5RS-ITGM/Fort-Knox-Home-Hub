@@ -56,13 +56,13 @@ export default function BottomTabs() {
               alignItems: "center", justifyContent: "center", gap: 3,
               textDecoration: "none",
               color: active ? "#e8a33d" : "#8a91a0",
-              fontSize: 11, fontWeight: 700,
+              fontSize: 10, fontWeight: 700,
               borderTop: active ? "2px solid #e8a33d" : "2px solid transparent",
               transition: "color .15s",
               touchAction: "manipulation",
             }}
           >
-            <Icon size={22} strokeWidth={active ? 2.4 : 2} />
+            <Icon size={20} strokeWidth={active ? 2.4 : 2} />
             {label}
           </a>
         );
@@ -74,10 +74,10 @@ export default function BottomTabs() {
           flex: 0.7, display: "flex", flexDirection: "column",
           alignItems: "center", justifyContent: "center", gap: 3,
           background: "transparent", border: "none", borderTop: "2px solid transparent",
-          color: "#5a616f", fontSize: 11, fontWeight: 700, cursor: "pointer", touchAction: "manipulation",
+          color: "#5a616f", fontSize: 10, fontWeight: 700, cursor: "pointer", touchAction: "manipulation",
         }}
       >
-        <LockOpen size={20} />
+        <LockOpen size={18} />
         Exit
       </button>
     </nav>

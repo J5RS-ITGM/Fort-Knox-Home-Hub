@@ -57,7 +57,11 @@ function activeVerb(e: Entity): string | null {
     if (dc === "smoke") return "Smoke";
     if (dc === "gas" || dc === "carbon_monoxide") return "Gas / CO";
     if (dc === "vibration") return "Vibration";
-    if (dc === "" || dc === "safety") return "Triggered";
+    // Everything else — empty/unknown/safety/power/connectivity device
+    // classes (AC-mains, tamper, low-battery, node-status diagnostics that
+    // Z-Wave JS exposes) — is NOT an alert. These were firing spurious
+    // "Triggered" cards. Only the security-relevant classes above alert.
+    return null;
   }
   if (e.domain === "lock" && e.state === "unlocked") return "Unlocked";
   return null;
@@ -68,6 +72,7 @@ export default function SensorFlash() {
   const { entities } = useHomeHub();
   const [event, setEvent] = useState<FlashEvent | null>(null);
   const [cfg, setCfg] = useState<AlertConfig>(DEFAULT_CFG);
+  const cfgLoaded = useRef(false);
   const cfgRef = useRef(cfg);
   useEffect(() => { cfgRef.current = cfg; }, [cfg]);
   useEffect(() => {
@@ -75,7 +80,7 @@ export default function SensorFlash() {
     const load = () =>
       api("/api/ui-settings")
         .then((r) => (r.ok ? r.json() : {}))
-        .then((v) => { if (alive) setCfg(parseCfg(v)); })
+        .then((v) => { if (alive) { setCfg(parseCfg(v)); cfgLoaded.current = true; } })
         .catch(() => {});
     load();
     const t = setInterval(load, 60_000); // settings edits apply within a minute
@@ -103,6 +108,7 @@ export default function SensorFlash() {
       return;
     }
     let latest: FlashEvent | null = null;
+    if (!cfgLoaded.current) return; // wait for real config before alerting
     for (const e of entities.values()) {
       const before = prev.current.get(e.entity_id);
       prev.current.set(e.entity_id, e.state);
