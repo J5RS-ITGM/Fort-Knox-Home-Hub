@@ -78,7 +78,7 @@ export default function MobileNav() {
           height: `calc(${MOBILE_TOP_H}px + env(safe-area-inset-top))`,
           paddingTop: "env(safe-area-inset-top)",
           display: "flex", alignItems: "center", gap: 10, padding: "0 12px",
-          background: "rgba(12,17,23,0.95)", backdropFilter: "blur(10px)",
+          background: "var(--color-field)",
           borderBottom: "1px solid var(--color-line)",
         }}
       >
@@ -99,7 +99,7 @@ export default function MobileNav() {
           height: `calc(${MOBILE_BOTTOM_H}px + env(safe-area-inset-bottom))`,
           paddingBottom: "env(safe-area-inset-bottom)",
           display: "flex", alignItems: "stretch",
-          background: "rgba(12,17,23,0.96)", backdropFilter: "blur(10px)",
+          background: "var(--color-field)",
           borderTop: "1px solid var(--color-line)",
         }}
       >

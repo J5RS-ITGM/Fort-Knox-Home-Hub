@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "HomeHub",
     short_name: "HomeHub",
     description: "Local-first home control and security",
-    start_url: "/sensors",
+    start_url: "/panel",
     display: "standalone",
     background_color: "#0c1117",
     theme_color: "#0c1117",

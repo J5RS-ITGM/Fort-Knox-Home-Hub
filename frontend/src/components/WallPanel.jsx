@@ -773,8 +773,7 @@ export default function WallPanel() {
   return (
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
       height: isMobile ? "auto" : "100dvh",
-      minHeight: isMobile ? "calc(100dvh - 118px)" : undefined,
-      width: isMobile ? "100%" : "100vw", overflow: isMobile ? "visible" : "hidden",
+      width: "100%", maxWidth:"100%", overflow: isMobile ? "visible" : "hidden",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       display:"flex", flexDirection:"column",
       paddingTop: isMobile ? 12 : "max(12px, env(safe-area-inset-top))",
@@ -828,15 +827,16 @@ export default function WallPanel() {
 
       {/* grid (desktop) / stack (mobile) */}
       {isMobile ? (
-        <div style={{ display:"flex", flexDirection:"column", gap:14, paddingBottom:8 }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:14, paddingBottom:8, width:"100%" }}>
           {Object.keys(layout).filter(id => layout[id].visible)
             .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
             .map(id => {
-              // clock is short; board/radar want height; rest get a sensible min.
-              // min-height (not fixed) so nothing clips and padding stays even.
-              const minH = id === "clock" ? 72 : (id === "board" || id === "radar") ? 320 : 180;
+              // Fixed heights per tile so Tile's height:100% resolves (a
+              // flex/min-height wrapper collapses it to zero — that was the
+              // "messed up cards" bug). Board/radar tall, clock short.
+              const h = id === "clock" ? 76 : (id === "board" || id === "radar") ? 320 : 210;
               return (
-                <div key={id} style={{ minHeight:minH, flexShrink:0, position:"relative", display:"flex" }}>
+                <div key={id} style={{ height:h, width:"100%", flexShrink:0, position:"relative" }}>
                   {tileContent[id]}
                 </div>
               );

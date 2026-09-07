@@ -5,7 +5,7 @@
 import { useEffect } from "react";
 
 export default function Home() {
-  useEffect(() => { window.location.replace("/sensors"); }, []);
+  useEffect(() => { window.location.replace("/panel"); }, []);
   return (
     <div className="grid min-h-dvh place-items-center text-sm text-ink-muted">
       Loading…
