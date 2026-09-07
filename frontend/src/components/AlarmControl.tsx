@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { callService, Entity, ServiceError } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 import { useMe } from "@/lib/auth";
@@ -205,7 +206,10 @@ export default function AlarmControl({
 
 /** Arm-type chooser: Away / Home / Night, each with a plain-English blurb. */
 function ArmTypePrompt({ onPick, onCancel }: { onPick: (m: ArmMode) => void; onCancel: () => void }) {
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(
     <div
       style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center",
                overflowY: "auto", padding: 16, background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)" }}
@@ -232,7 +236,8 @@ function ArmTypePrompt({ onPick, onCancel }: { onPick: (m: ArmMode) => void; onC
           style={{ marginTop: 4, padding: "10px 0", background: "transparent", border: "none",
                    color: C.sub, fontSize: 13, cursor: "pointer" }}>Cancel</button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -245,6 +250,8 @@ function PinPad({
   onSubmit: (pin: string) => void; onCancel: () => void;
 }) {
   const [pin, setPin] = useState("");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   useEffect(() => { if (error) setPin(""); }, [error]);
 
   const press = (d: string) => setPin((p) => (p.length < 8 ? p + d : p));
@@ -266,7 +273,8 @@ function PinPad({
     </button>
   );
 
-  return (
+  if (!mounted) return null;
+  return createPortal(
     <div
       style={{
         position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center",
@@ -315,7 +323,8 @@ function PinPad({
           {busy ? "Checking…" : "Confirm"}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

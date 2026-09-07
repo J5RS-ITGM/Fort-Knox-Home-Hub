@@ -590,6 +590,13 @@ export default function WallPanel() {
 
   // ---- grid geometry ----
   const gridRef = useRef();
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
   const [gridSize, setGridSize] = useState({ w:1200, h:700 });
   useEffect(() => {
     const el = gridRef.current; if (!el) return;
@@ -764,36 +771,43 @@ export default function WallPanel() {
   const hiddenTiles = Object.keys(layout).filter(id => !layout[id].visible);
 
   return (
-    <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif", height:"100dvh", width:"100vw", overflow:"hidden",
+    <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
+      height: isMobile ? "auto" : "100dvh",
+      minHeight: isMobile ? "calc(100dvh - 118px)" : undefined,
+      width: isMobile ? "100%" : "100vw", overflow:"hidden",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       display:"flex", flexDirection:"column",
-      paddingTop:"max(12px, env(safe-area-inset-top))",
-      paddingBottom:`calc(${BOTTOM_TABS_HEIGHT}px + max(12px, env(safe-area-inset-bottom)))`,
-      paddingLeft:"max(12px, env(safe-area-inset-left))", paddingRight:"max(12px, env(safe-area-inset-right))",
+      paddingTop: isMobile ? 12 : "max(12px, env(safe-area-inset-top))",
+      paddingBottom: isMobile ? 12 : `calc(${BOTTOM_TABS_HEIGHT}px + max(12px, env(safe-area-inset-bottom)))`,
+      paddingLeft: isMobile ? 12 : "max(12px, env(safe-area-inset-left))", paddingRight: isMobile ? 12 : "max(12px, env(safe-area-inset-right))",
       boxSizing:"border-box" }}>
 
       {/* header */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-        background:C.card, border:`1px solid ${allSecure?C.edge:C.open}`, borderRadius:16, padding:"12px 18px", marginBottom:12, flexShrink:0 }}>
-        <div style={{display:"flex", alignItems:"center", gap:14}}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8,
+        background:C.card, border:`1px solid ${allSecure?C.edge:C.open}`, borderRadius:16, padding: isMobile ? "10px 14px" : "12px 18px", marginBottom:12, flexShrink:0 }}>
+        <div style={{display:"flex", alignItems:"center", gap:isMobile?9:14, flexWrap:"wrap"}}>
           <span style={{width:11,height:11,borderRadius:11, background: allSecure?C.secure:C.open, boxShadow:`0 0 10px ${allSecure?C.secure:C.open}`}}/>
-          <span style={{fontSize:20, fontWeight:800}}>{allSecure?"All Secure":`${summary.open} Open`}</span>
-          <span style={{fontSize:13, color:C.sub}}>
+          <span style={{fontSize:isMobile?16:20, fontWeight:800}}>{allSecure?"All Secure":`${summary.open} Open`}</span>
+          <span style={{fontSize:isMobile?11:13, color:C.sub}}>
             {alarm ? (alarm.state === "armed_away" ? "Armed — Away" : alarm.state === "armed_home" ? "Armed — Home" : "Disarmed") : "Alarm offline"}
             {" · "}{summary.low} low battery
             {summary.offline > 0 && ` · ${summary.offline} offline`}
           </span>
-          <span title={linkUp ? (bridgeUp ? "Backend + HA bridge up" : "Backend up, HA bridge down") : "Backend link down"}
-            style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color: linkUp && bridgeUp ? C.sub : C.open}}>
-            <Wifi size={13}/>{linkUp ? (bridgeUp ? "live" : "no bridge") : "offline"}
-          </span>
+          {!isMobile && (
+            <span title={linkUp ? (bridgeUp ? "Backend + HA bridge up" : "Backend up, HA bridge down") : "Backend link down"}
+              style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color: linkUp && bridgeUp ? C.sub : C.open}}>
+              <Wifi size={13}/>{linkUp ? (bridgeUp ? "live" : "no bridge") : "offline"}
+            </span>
+          )}
         </div>
-        <div style={{display:"flex", alignItems:"center", gap:8}}>
-          <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-            <Settings2 size={17}/>{edit?"Done":"Edit"}
-          </button>
-          <AlarmControl variant="compact" />
-        </div>
+        {!isMobile && (
+          <div style={{display:"flex", alignItems:"center", gap:8}}>
+            <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+              <Settings2 size={17}/>{edit?"Done":"Edit"}
+            </button>
+            <AlarmControl variant="compact" />
+          </div>
+        )}
       </div>
 
       {/* edit toolbar */}
@@ -812,7 +826,22 @@ export default function WallPanel() {
         </div>
       )}
 
-      {/* grid */}
+      {/* grid (desktop) / stack (mobile) */}
+      {isMobile ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:12, overflowY:"auto", flex:1, minHeight:0, paddingBottom:12 }}>
+          {Object.keys(layout).filter(id => layout[id].visible)
+            .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
+            .map(id => {
+              // clock is short; board/radar want height; rest get a sensible min
+              const h = id === "clock" ? 64 : (id === "board" || id === "radar") ? 300 : 200;
+              return (
+                <div key={id} style={{ height:h, flexShrink:0, position:"relative" }}>
+                  {tileContent[id]}
+                </div>
+              );
+            })}
+        </div>
+      ) : (
       <div ref={gridRef} style={{ position:"relative", flex:1, minHeight:0,
         background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${cellH-1}px, rgba(107,138,253,0.06) ${cellH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
         borderRadius:12 }}>
@@ -835,6 +864,7 @@ export default function WallPanel() {
           );
         })}
       </div>
+      )}
 
       {showRadar && <LiveRadar onClose={()=>setShowRadar(false)}/>}
       <BottomTabs/>
