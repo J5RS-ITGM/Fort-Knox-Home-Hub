@@ -80,7 +80,7 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     cam.position.set(11,12,11); cam.lookAt(0,1.4,0);
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
-    renderer.setSize(W,H); mount.appendChild(renderer.domElement);
+    renderer.setSize(W,H); mount.appendChild(renderer.domElement); renderer.domElement.style.touchAction="pan-y";
     scene.add(new THREE.AmbientLight(0xffffff,0.6));
     const key = new THREE.DirectionalLight(0xffffff,0.75); key.position.set(8,14,6); scene.add(key);
     const fill = new THREE.DirectionalLight(0x6b7ce0,0.25); fill.position.set(-6,8,-4); scene.add(fill);
@@ -166,7 +166,7 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     const ro=new ResizeObserver(onResize); ro.observe(mount);
     return ()=>{ cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); if(renderer.domElement.parentNode) mount.removeChild(renderer.domElement); };
   }, [floorView, plan, placements, labels, liveStateRef, armedRef, themeTick]);
-  return <div ref={mountRef} style={{ width:"100%", height:"100%" }} />;
+  return <div ref={mountRef} style={{ width:"100%", height:"100%", touchAction:"pan-y" }} />;
 }
 
 // ================= RADAR (live — RainViewer via backend proxy) ================
@@ -351,7 +351,7 @@ function LiveRadar({ onClose }) {
         <button onClick={onClose} style={{ background:"transparent", color:C.text, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 12px", cursor:"pointer" }}><X size={16}/></button>
       </div>
       <div style={{ flex:1, margin:"0 18px 8px", borderRadius:14, overflow:"hidden", border:`1px solid ${C.edge}` }}>
-        <canvas ref={canvasRef} style={{ width:"100%", height:"100%", display:"block" }}/>
+        <canvas ref={canvasRef} style={{ width:"100%", height:"100%", display:"block", touchAction:"pan-y" }}/>
       </div>
       <input type="range" min={0} max={Math.max(0, frames.length-1)} value={idx}
         onChange={(e)=>{ setPlaying(false); setIdx(Number(e.target.value)); }}
@@ -377,7 +377,7 @@ function ClockStrip() {
   const secs = now.toLocaleTimeString([], { second: "2-digit" }).padStart(2, "0");
   const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   return (
-    <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", gap:14, flexWrap:"wrap",
+    <div style={{ width:"100%", minHeight:"100%", display:"flex", alignItems:"center", gap:14, flexWrap:"wrap",
                   padding:"16px 20px", boxSizing:"border-box",
                   background:C.card, border:`1px solid ${C.edge}`, borderRadius:16 }}>
       <span style={{ fontSize:34, fontWeight:800, color:C.text, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{time}</span>
@@ -591,7 +591,7 @@ export default function WallPanel() {
 
   // ---- grid geometry ----
   const gridRef = useRef();
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
     check();
@@ -657,9 +657,9 @@ export default function WallPanel() {
   // ---- tile content ----
   const tileContent = {
     clock: (
-      <div style={{ position:"relative", height:"100%" }}>
+      <div style={{ position:"relative" }}>
         <ClockStrip/>
-        {edit && <button onClick={()=>setVisible("clock",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer"}}><EyeOff size={15}/></button>}
+        {edit && <button onClick={()=>setVisible("clock",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer", zIndex:2}}><EyeOff size={15}/></button>}
       </div>
     ),
     board: (
@@ -836,12 +836,13 @@ export default function WallPanel() {
           {Object.keys(layout).filter(id => layout[id].visible)
             .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
             .map(id => {
-              // Fixed heights per tile so Tile's height:100% resolves (a
-              // flex/min-height wrapper collapses it to zero — that was the
-              // "messed up cards" bug). Board/radar tall, clock short.
-              const h = id === "clock" ? 76 : (id === "board" || id === "radar") ? 320 : 210;
+              // Canvas tiles (3D board, radar) need an explicit height. Everything
+              // else sizes to its content so nothing overflows or clips.
+              const fixed = (id === "board" || id === "radar") ? 320 : null;
               return (
-                <div key={id} style={{ height:h, width:"100%", flexShrink:0, position:"relative" }}>
+                <div key={id} style={fixed
+                  ? { height:fixed, width:"100%", flexShrink:0, position:"relative", touchAction:"pan-y" }
+                  : { width:"100%", flexShrink:0, position:"relative" }}>
                   {tileContent[id]}
                 </div>
               );
