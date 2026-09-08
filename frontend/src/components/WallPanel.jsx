@@ -564,6 +564,10 @@ export default function WallPanel() {
   useEffect(()=>{ armedRef.current = armed; },[armed]);
 
   useEffect(()=>{
+    // The full-screen desktop/kiosk panel locks the body so it behaves like
+    // a fixed dashboard. On mobile the panel is a normal scrolling page —
+    // locking the body there is exactly what broke vertical scrolling.
+    if (window.innerWidth < 640) return;
     const prev = { o:document.body.style.overflow, ob:document.body.style.overscrollBehavior, m:document.body.style.margin };
     document.body.style.overflow="hidden"; document.body.style.overscrollBehavior="none"; document.body.style.margin="0";
     return ()=>{ document.body.style.overflow=prev.o; document.body.style.overscrollBehavior=prev.ob; document.body.style.margin=prev.m; };
@@ -775,40 +779,14 @@ export default function WallPanel() {
 
   const hiddenTiles = Object.keys(layout).filter(id => !layout[id].visible);
 
-  // TEMP DEBUG: measure the height chain to see what caps scroll.
-  const [dbg, setDbg] = useState("");
-  useEffect(() => {
-    const measure = () => {
-      const chain = [];
-      let el = document.getElementById("panel-root");
-      while (el && el !== document.body) {
-        const cs = getComputedStyle(el);
-        chain.push(`${el.tagName}.${String(el.className||"").split(" ")[0]||"?"}: h=${el.clientHeight} sh=${el.scrollHeight} ov=${cs.overflowY} pos=${cs.position}`);
-        el = el.parentElement;
-      }
-      const b = document.body, h = document.documentElement;
-      setDbg([
-        `winH=${window.innerHeight} vvH=${Math.round(window.visualViewport?.height||0)}`,
-        `html h=${h.clientHeight} sh=${h.scrollHeight} ov=${getComputedStyle(h).overflowY}`,
-        `body h=${b.clientHeight} sh=${b.scrollHeight} ov=${getComputedStyle(b).overflowY}`,
-        ...chain,
-      ].join("\n"));
-    };
-    measure();
-    const t = setInterval(measure, 1500);
-    return () => clearInterval(t);
-  }, []);
-
   return (
-    <div id="panel-root" style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
+    <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
       minHeight: "100dvh",
       width: "100%", maxWidth:"100%",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       padding: "12px",
       paddingBottom:`calc(12px + env(safe-area-inset-bottom))`,
       boxSizing:"border-box" }}>
-      <pre style={{position:"fixed", top:60, left:4, zIndex:9999, background:"rgba(0,0,0,0.85)", color:"#0f0",
-        fontSize:9, lineHeight:1.3, padding:6, margin:0, maxWidth:"70vw", whiteSpace:"pre-wrap", pointerEvents:"none", borderRadius:6}}>{dbg}</pre>
 
       {/* header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8,
