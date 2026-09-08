@@ -1,4 +1,9 @@
-# HomeHub stack — db + backend + frontend.
+# HomeHub stack — db + fortknox-backend + fortknox-frontend.
+#
+# NOTE: services are prefixed "fortknox-" so their implicit Docker network
+# aliases never collide with another app on a shared external network
+# (e.g. the business hub's "frontend" service on hub_default). Do not
+# rename back to bare frontend/backend.
 #
 # Shared-box friendly: services bind to 127.0.0.1 on non-default ports by
 # default, so a host reverse proxy (nginx/Caddy) terminates TLS and routes
@@ -20,7 +25,7 @@ services:
       timeout: 3s
       retries: 10
 
-  backend:
+  fortknox-backend:
     build: ./backend
     restart: unless-stopped
     environment:
@@ -50,13 +55,13 @@ services:
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${BACKEND_PORT:-8100}:8000"
 
-  frontend:
+  fortknox-frontend:
     build: ./frontend
     restart: unless-stopped
     # No NEXT_PUBLIC_* URLs: the app defaults to same-origin (/api, /ws),
     # which is exactly right behind the reverse proxy.
     depends_on:
-      - backend
+      - fortknox-backend
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${FRONTEND_PORT:-3100}:3000"
 
