@@ -147,10 +147,11 @@ body {
 }
 
 /* Panel layout: CSS decides mobile stack vs desktop grid (bulletproof —
-   JS viewport detection was unreliable in the standalone PWA). */
+   JS viewport detection was unreliable in the standalone PWA). The elements
+   carry no inline `display`, so these rules fully control visibility. */
 .panel-stack-mobile { display: none; }
 .panel-grid-desktop { display: block; }
 @media (max-width: 639px) {
-  .panel-stack-mobile { display: flex !important; }
-  .panel-grid-desktop { display: none !important; }
+  .panel-stack-mobile { display: flex; }
+  .panel-grid-desktop { display: none; }
 }

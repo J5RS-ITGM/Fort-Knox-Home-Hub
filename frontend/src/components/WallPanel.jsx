@@ -778,9 +778,8 @@ export default function WallPanel() {
   return (
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
       minHeight: "100dvh",
-      width: "100%", maxWidth:"100%", overflow:"visible",
+      width: "100%", maxWidth:"100%",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
-      display:"flex", flexDirection:"column",
       padding: "12px",
       paddingBottom:`calc(12px + env(safe-area-inset-bottom))`,
       boxSizing:"border-box" }}>
@@ -831,7 +830,7 @@ export default function WallPanel() {
 
       {/* grid (desktop) / stack (mobile) — CSS decides which shows, so it
           can't be wrong regardless of how the PWA reports viewport size */}
-      <div className="panel-stack-mobile" style={{ display:"flex", flexDirection:"column", gap:14, paddingBottom:8, width:"100%" }}>
+      <div className="panel-stack-mobile" style={{ flexDirection:"column", gap:14, paddingBottom:8, width:"100%" }}>
         {Object.keys(layout).filter(id => layout[id].visible)
           .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
           .map(id => {
@@ -846,7 +845,7 @@ export default function WallPanel() {
           })}
       </div>
 
-      <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", flex:1, minHeight:0,
+      <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", minHeight:"calc(100dvh - 90px)",
         background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${cellH-1}px, rgba(107,138,253,0.06) ${cellH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
         borderRadius:12 }}>
         {Object.keys(layout).filter(id => layout[id].visible).map(id => {
