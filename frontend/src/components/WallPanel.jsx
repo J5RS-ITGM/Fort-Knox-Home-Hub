@@ -481,12 +481,26 @@ export default function WallPanel() {
     return s;
   }, [placements, entities]);
 
-  // devices tile from live light/switch domains (+ sump monitor)
+  // devices tile from live light/switch/lock domains (+ sump monitor)
   const devices = useMemo(() => {
     const list = [];
     for (const e of entities.values()) {
       if (e.domain === "light" || e.domain === "switch") {
         list.push({ entity_id: e.entity_id, name: e.friendly_name, on: e.state === "on", kind: e.domain });
+      } else if (e.domain === "lock") {
+        // Z-Wave JS companion entity: <lock_name>_current_status_of_the_door
+        const n = e.entity_id.split(".")[1];
+        const ds = entities.get(`binary_sensor.${n}_current_status_of_the_door`)
+                ?? entities.get(`sensor.${n}_current_status_of_the_door`);
+        const door = !ds || ds.state === "unavailable" || ds.state === "unknown" ? null
+          : (ds.state === "on" || ds.state === "open") ? "Open"
+          : (ds.state === "off" || ds.state === "closed") ? "Closed" : ds.state;
+        list.push({
+          entity_id: e.entity_id, name: e.friendly_name, kind: "lock",
+          on: e.state !== "locked",             // highlight when NOT secured
+          lockState: e.state, door,
+          sub: `${e.state === "locked" ? "Locked" : e.state === "unlocked" ? "Unlocked" : e.state}${door ? ` · Door ${door}` : ""}`,
+        });
       }
     }
     list.sort((a, b) => a.name.localeCompare(b.name));
@@ -590,7 +604,16 @@ export default function WallPanel() {
   const [busy, setBusy] = useState(false);
   const toggleDevice = async (d) => {
     if (d.kind === "monitor") return;
-    try { await callService(d.kind, "toggle", d.entity_id); } catch (e) { console.error(e); }
+    try {
+      if (d.kind === "lock") {
+        // Explicit direction — lock.toggle isn't allowlisted, and deadbolts
+        // shouldn't get ambiguous toggles. In-motion states are ignored.
+        if (d.lockState === "locking" || d.lockState === "unlocking") return;
+        await callService("lock", d.lockState === "locked" ? "unlock" : "lock", d.entity_id);
+      } else {
+        await callService(d.kind, "toggle", d.entity_id);
+      }
+    } catch (e) { console.error(e); }
   };
 
   // ---- grid geometry ----
@@ -742,11 +765,21 @@ export default function WallPanel() {
       <Tile title="Devices" edit={edit} onToggleVisible={()=>setVisible("devices",false)}>
         <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:7, marginBottom:8}}>
           {devices.map((d)=>(
-            <button key={d.entity_id} onClick={()=>!edit && toggleDevice(d)} style={{ display:"flex", alignItems:"center", gap:7, background: d.on&&d.kind!=="monitor"?"rgba(107,138,253,0.15)":C.cardHi, border:`1px solid ${d.on&&d.kind!=="monitor"?C.accent:C.edge}`, borderRadius:10, padding:"8px 9px", cursor: d.kind==="monitor"||edit?"default":"pointer", color:C.text, textAlign:"left" }}>
+            <button key={d.entity_id} onClick={()=>!edit && toggleDevice(d)} style={{ display:"flex", alignItems:"center", gap:7, background: d.on&&d.kind!=="monitor"?"rgba(107,138,253,0.15)":C.cardHi, border:`1px solid ${d.kind==="lock" ? (d.on?C.open:C.secure) : d.on&&d.kind!=="monitor"?C.accent:C.edge}`, borderRadius:10, padding:"8px 9px", cursor: d.kind==="monitor"||edit?"default":"pointer", color:C.text, textAlign:"left" }}>
               {d.kind==="light" && <Lightbulb size={15} color={d.on?C.motion:C.subDim}/>}
               {d.kind==="switch" && <Zap size={15} color={d.on?C.secure:C.subDim}/>}
+              {d.kind==="lock" && (d.lockState==="locked"
+                ? <Lock size={15} color={C.secure}/>
+                : <Unlock size={15} color={C.open}/>)}
               {d.kind==="monitor" && <Wifi size={15} color={C.secure}/>}
-              <span style={{fontSize:11, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
+              {d.kind==="lock" ? (
+                <span style={{minWidth:0}}>
+                  <span style={{display:"block", fontSize:11, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
+                  <span style={{display:"block", fontSize:9.5, color:C.sub, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.sub}</span>
+                </span>
+              ) : (
+                <span style={{fontSize:11, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
+              )}
             </button>
           ))}
         </div>

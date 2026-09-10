@@ -10,9 +10,30 @@ import { callService, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 const isOn = (e: Entity) => e.state === "on";
-const CONTROLLABLE = (e: Entity) => e.domain === "light" || e.domain === "switch" || e.domain === "fan";
+const CONTROLLABLE = (e: Entity) =>
+  e.domain === "light" || e.domain === "switch" || e.domain === "fan" || e.domain === "lock";
 
 function niceName(e: Entity) { return e.friendly_name || e.entity_id; }
+
+/** Z-Wave JS exposes a lock's door sense as a companion entity named
+ *  `<domain>.<lock_name>_current_status_of_the_door`. Resolve it from the
+ *  lock's entity_id so this works for any lock, not just the front door. */
+function doorStatusFor(lock: Entity, entities: Map<string, Entity>): string | null {
+  const name = lock.entity_id.split(".")[1];
+  const ent =
+    entities.get(`binary_sensor.${name}_current_status_of_the_door`) ??
+    entities.get(`sensor.${name}_current_status_of_the_door`);
+  if (!ent || ent.state === "unavailable" || ent.state === "unknown") return null;
+  // binary_sensor: on=open / off=closed; sensor variant reports open/closed strings
+  if (ent.state === "on" || ent.state === "open") return "Open";
+  if (ent.state === "off" || ent.state === "closed") return "Closed";
+  return ent.state;
+}
+
+const LOCK_STATE_LABEL: Record<string, string> = {
+  locked: "Locked", unlocked: "Unlocked", locking: "Locking…",
+  unlocking: "Unlocking…", jammed: "Jammed",
+};
 
 export default function ControlPage() {
   const { entities, linkUp } = useHomeHub();
@@ -29,6 +50,7 @@ export default function ControlPage() {
     light: items.filter((e) => e.domain === "light"),
     switch: items.filter((e) => e.domain === "switch"),
     fan: items.filter((e) => e.domain === "fan"),
+    lock: items.filter((e) => e.domain === "lock"),
   }), [items]);
 
   const mark = (id: string, on: boolean) =>
@@ -46,6 +68,15 @@ export default function ControlPage() {
     setDragBri((d) => ({ ...d, [e.entity_id]: val }));
     try { await callService("light", "turn_on", e.entity_id, { brightness: val }); }
     catch (err) { console.error(err); }
+  };
+
+  // Explicit lock/unlock (never toggle): lock.toggle isn't allowlisted, and a
+  // deadbolt action should always be unambiguous about direction.
+  const lockAction = async (e: Entity, service: "lock" | "unlock") => {
+    mark(e.entity_id, true);
+    try { await callService("lock", service, e.entity_id); }
+    catch (err) { console.error(err); }
+    finally { setTimeout(() => mark(e.entity_id, false), 400); }
   };
 
   const dimmable = (e: Entity) => e.domain === "light" &&
@@ -88,6 +119,41 @@ export default function ControlPage() {
     );
   };
 
+  const lockCard = (e: Entity) => {
+    const working = busy.has(e.entity_id);
+    const locked = e.state === "locked";
+    const jammed = e.state === "jammed";
+    const inMotion = e.state === "locking" || e.state === "unlocking";
+    const door = doorStatusFor(e, entities);
+    const battery = e.attributes?.battery as number | undefined;
+    return (
+      <div key={e.entity_id} className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{niceName(e)}</div>
+            <div className="text-[11px] text-ink-muted">
+              <span style={jammed ? { color: "var(--color-alert)" } : undefined}>
+                {LOCK_STATE_LABEL[e.state] ?? e.state}
+              </span>
+              {door && <> · Door {door}</>}
+              {battery != null && <> · {battery}%</>}
+            </div>
+          </div>
+          <button
+            onClick={() => lockAction(e, locked ? "unlock" : "lock")}
+            disabled={working || inMotion}
+            className="shrink-0 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-60"
+            style={locked
+              ? { borderColor: "var(--color-line)", color: "var(--color-ink)" }
+              : { borderColor: "var(--color-ok)", background: "var(--color-ok)", color: "#0c0e13" }}
+          >
+            {locked ? "Unlock" : "Lock"}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const section = (label: string, list: Entity[]) => list.length > 0 && (
     <section className="mb-8">
       <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">{label}</h2>
@@ -103,6 +169,14 @@ export default function ControlPage() {
         <p className="mb-6 rounded-md border border-alert/40 bg-panel p-3 text-sm text-ink-muted">
           Reconnecting to the HomeHub backend…
         </p>
+      )}
+      {groups.lock.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Locks</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {groups.lock.map(lockCard)}
+          </div>
+        </section>
       )}
       {section("Lights", groups.light)}
       {section("Switches", groups.switch)}

@@ -52,9 +52,14 @@ SEED: list[dict[str, Any]] = [
     # Smoke/CO bridge — Ecolink FireFighter
     {"entity_id": "binary_sensor.smoke_co_bridge", "state": "off",
      "attributes": {"friendly_name": "Smoke / CO", "device_class": "smoke", "model": "Ecolink FireFighter"}},
-    # Lock — Schlage BE469ZP
-    {"entity_id": "lock.front_door", "state": "locked",
+    # Lock — Schlage BE469ZP. Entity IDs mirror the real Z-Wave JS naming
+    # (lock.front_door_lock + companion door-status binary_sensor) so the
+    # frontend's suffix lookup works identically in mock and live modes.
+    {"entity_id": "lock.front_door_lock", "state": "locked",
      "attributes": {"friendly_name": "Front Door Lock", "model": "Schlage BE469ZP", "battery": 82}},
+    {"entity_id": "binary_sensor.front_door_lock_current_status_of_the_door", "state": "off",
+     "attributes": {"friendly_name": "Front Door Lock Current status of the door", "device_class": "door",
+                    "model": "Schlage BE469ZP"}},
     # Pool pump — Zooz ZEN15 (power metering)
     {"entity_id": "switch.pool_pump", "state": "on",
      "attributes": {"friendly_name": "Pool Pump", "model": "Zooz ZEN15", "power_w": 1180}},
