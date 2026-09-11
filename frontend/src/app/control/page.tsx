@@ -142,10 +142,11 @@ export default function ControlPage() {
           <button
             onClick={() => lockAction(e, locked ? "unlock" : "lock")}
             disabled={working || inMotion}
-            className="shrink-0 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-60"
-            style={locked
-              ? { borderColor: "var(--color-line)", color: "var(--color-ink)" }
-              : { borderColor: "var(--color-ok)", background: "var(--color-ok)", color: "#0c0e13" }}
+            className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
+              locked
+                ? "border border-line text-ink"
+                : "bg-lamp text-field hover:opacity-90"
+            }`}
           >
             {locked ? "Unlock" : "Lock"}
           </button>

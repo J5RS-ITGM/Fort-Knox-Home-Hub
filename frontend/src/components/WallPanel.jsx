@@ -389,18 +389,22 @@ function ClockStrip() {
 
 // ================= LAYOUT =====================
 const GRID_COLS = 12;
+// Each tile: desktop grid slot (x,y,w,h), visibility, and `m` = mobile stack
+// order (independent of the desktop grid so phones can arrange their own
+// sequence). Lock defaults near the top on mobile — it's an action card.
 const DEFAULT_LAYOUT = {
-  clock:   { x:0, y:0, w:12, h:1, visible:true },
-  board:   { x:0, y:1, w:6, h:4, visible:true },
-  weather: { x:6, y:1, w:3, h:2, visible:true },
-  radar:   { x:9, y:1, w:3, h:2, visible:true },
-  climate: { x:6, y:3, w:3, h:2, visible:true },
-  calendar:{ x:9, y:3, w:3, h:2, visible:true },
-  devices: { x:0, y:5, w:6, h:2, visible:true },
-  tasks:   { x:6, y:5, w:6, h:2, visible:true },
+  clock:   { x:0, y:0, w:12, h:1, visible:true, m:0 },
+  lock:    { x:4, y:5, w:2, h:2, visible:true, m:1 },
+  board:   { x:0, y:1, w:6, h:4, visible:true, m:2 },
+  weather: { x:6, y:1, w:3, h:2, visible:true, m:3 },
+  radar:   { x:9, y:1, w:3, h:2, visible:true, m:4 },
+  climate: { x:6, y:3, w:3, h:2, visible:true, m:5 },
+  calendar:{ x:9, y:3, w:3, h:2, visible:true, m:6 },
+  devices: { x:0, y:5, w:4, h:2, visible:true, m:7 },
+  tasks:   { x:6, y:5, w:6, h:2, visible:true, m:8 },
 };
 const TILE_META = {
-  clock:{label:"Clock"}, board:{label:"Home Map"}, weather:{label:"Weather"}, radar:{label:"Radar"},
+  clock:{label:"Clock"}, lock:{label:"Locks"}, board:{label:"Home Map"}, weather:{label:"Weather"}, radar:{label:"Radar"},
   climate:{label:"Climate"}, calendar:{label:"Today"}, devices:{label:"Devices"}, tasks:{label:"Tasks"},
 };
 const LS_KEY = "homehub.wallpanel.layout.v2";
@@ -481,29 +485,38 @@ export default function WallPanel() {
     return s;
   }, [placements, entities]);
 
-  // devices tile from live light/switch/lock domains (+ sump monitor)
+  // Locks tile: every lock entity + its Z-Wave JS companion door sensor
+  // (<lock_name>_current_status_of_the_door, binary_sensor or sensor).
+  const locks = useMemo(() => {
+    const list = [];
+    for (const e of entities.values()) {
+      if (e.domain !== "lock") continue;
+      const n = e.entity_id.split(".")[1];
+      const ds = entities.get(`binary_sensor.${n}_current_status_of_the_door`)
+              ?? entities.get(`sensor.${n}_current_status_of_the_door`);
+      const door = !ds || ds.state === "unavailable" || ds.state === "unknown" ? null
+        : (ds.state === "on" || ds.state === "open") ? "Open"
+        : (ds.state === "off" || ds.state === "closed") ? "Closed" : ds.state;
+      list.push({ entity_id: e.entity_id, name: e.friendly_name, state: e.state, door,
+                  battery: e.attributes?.battery });
+    }
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }, [entities]);
+
+  // devices tile from live light/switch domains (+ sump monitor). Locks
+  // live in their own tile now — keep them out so nothing shows twice.
   const devices = useMemo(() => {
     const list = [];
     for (const e of entities.values()) {
       if (e.domain === "light" || e.domain === "switch") {
         list.push({ entity_id: e.entity_id, name: e.friendly_name, on: e.state === "on", kind: e.domain });
-      } else if (e.domain === "lock") {
-        // Z-Wave JS companion entity: <lock_name>_current_status_of_the_door
-        const n = e.entity_id.split(".")[1];
-        const ds = entities.get(`binary_sensor.${n}_current_status_of_the_door`)
-                ?? entities.get(`sensor.${n}_current_status_of_the_door`);
-        const door = !ds || ds.state === "unavailable" || ds.state === "unknown" ? null
-          : (ds.state === "on" || ds.state === "open") ? "Open"
-          : (ds.state === "off" || ds.state === "closed") ? "Closed" : ds.state;
-        list.push({
-          entity_id: e.entity_id, name: e.friendly_name, kind: "lock",
-          on: e.state !== "locked",             // highlight when NOT secured
-          lockState: e.state, door,
-          sub: `${e.state === "locked" ? "Locked" : e.state === "unlocked" ? "Unlocked" : e.state}${door ? ` · Door ${door}` : ""}`,
-        });
       }
     }
-    list.sort((a, b) => a.name.localeCompare(b.name));
+    // group by type so the phone grid reads as lights, then switches,
+    // then monitors — not one alphabetical mix
+    const KIND_ORDER = { light: 0, switch: 1, monitor: 2 };
+    list.sort((a, b) => (KIND_ORDER[a.kind] - KIND_ORDER[b.kind]) || a.name.localeCompare(b.name));
     const sump = entities.get("sensor.sump_pump_current");
     if (sump) list.push({ entity_id: sump.entity_id, name: `Sump ${sump.state}A`, on: true, kind: "monitor" });
     return list;
@@ -536,11 +549,36 @@ export default function WallPanel() {
   }, []);
   const [showRadar, setShowRadar] = useState(false);
   const [edit, setEdit] = useState(false);
+  // Mobile "Arrange" mode: shows up/down controls on each stacked card.
+  // (Touch drag in a scrolling stack is unreliable; arrows always work.)
+  const [arrange, setArrange] = useState(false);
+  const mobileIds = (l) => Object.keys(l).filter(id => l[id].visible)
+    .sort((a,b) => (l[a].m ?? 99) - (l[b].m ?? 99) || (l[a].y - l[b].y) || (l[a].x - l[b].x));
+  const moveMobile = (id, dir) => setLayout(prev => {
+    const order = mobileIds(prev);
+    const i = order.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return prev;
+    const other = order[j];
+    // normalize m to the current visual order, then swap the two neighbors
+    const next = { ...prev };
+    order.forEach((tid, idx) => { next[tid] = { ...next[tid], m: idx }; });
+    next[id] = { ...next[id], m: j };
+    next[other] = { ...next[other], m: i };
+    return next;
+  });
 
   // ---- layout: server-backed with localStorage fallback --------------------
-  // Saved layouts predate newly shipped tiles (e.g. clock): merge defaults
-  // underneath so new tiles appear without wiping user arrangements.
-  const withNewTiles = (saved) => ({ ...DEFAULT_LAYOUT, ...saved });
+  // Saved layouts predate newly shipped tiles (e.g. clock, lock): merge
+  // defaults underneath so new tiles appear without wiping user
+  // arrangements, and backfill the mobile-order field on older saves.
+  const withNewTiles = (saved) => {
+    const merged = { ...DEFAULT_LAYOUT, ...saved };
+    for (const id of Object.keys(merged)) {
+      if (merged[id].m == null) merged[id] = { ...merged[id], m: DEFAULT_LAYOUT[id]?.m ?? 99 };
+    }
+    return merged;
+  };
   const [layout, setLayout] = useState(() => {
     if (typeof window !== "undefined") {
       try { const s = localStorage.getItem(LS_KEY); if (s) return withNewTiles(JSON.parse(s)); } catch {}
@@ -604,16 +642,14 @@ export default function WallPanel() {
   const [busy, setBusy] = useState(false);
   const toggleDevice = async (d) => {
     if (d.kind === "monitor") return;
-    try {
-      if (d.kind === "lock") {
-        // Explicit direction — lock.toggle isn't allowlisted, and deadbolts
-        // shouldn't get ambiguous toggles. In-motion states are ignored.
-        if (d.lockState === "locking" || d.lockState === "unlocking") return;
-        await callService("lock", d.lockState === "locked" ? "unlock" : "lock", d.entity_id);
-      } else {
-        await callService(d.kind, "toggle", d.entity_id);
-      }
-    } catch (e) { console.error(e); }
+    try { await callService(d.kind, "toggle", d.entity_id); } catch (e) { console.error(e); }
+  };
+  // Explicit lock/unlock (never toggle): lock.toggle isn't allowlisted, and
+  // deadbolts shouldn't get ambiguous toggles. In-motion states are ignored.
+  const lockAction = async (l) => {
+    if (l.state === "locking" || l.state === "unlocking") return;
+    try { await callService("lock", l.state === "locked" ? "unlock" : "lock", l.entity_id); }
+    catch (e) { console.error(e); }
   };
 
   // ---- grid geometry ----
@@ -761,25 +797,51 @@ export default function WallPanel() {
         </div>
       </Tile>
     ),
+    lock: (
+      <Tile title="Locks" edit={edit} onToggleVisible={()=>setVisible("lock",false)}>
+        <div style={{display:"flex", flexDirection:"column", gap:10, justifyContent:"center", height:"100%"}}>
+          {locks.length === 0 && <span style={{fontSize:12, color:C.sub}}>No locks paired.</span>}
+          {locks.map((l)=>{
+            const locked = l.state === "locked";
+            const jammed = l.state === "jammed";
+            const inMotion = l.state === "locking" || l.state === "unlocking";
+            return (
+              <div key={l.entity_id} style={{display:"flex", alignItems:"center", gap:12}}>
+                {/* Door-indicator convention (Eric's call): red = locked/no
+                    entry, green = unlocked/go. Intentionally opposite of the
+                    sensor board's green=secure — do not "fix" this. */}
+                {locked ? <Lock size={26} color={C.open}/> : <Unlock size={26} color={C.secure}/>}
+                <div style={{minWidth:0, flex:1}}>
+                  <div style={{fontSize:14, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{l.name}</div>
+                  <div style={{fontSize:11, color: jammed ? C.open : C.sub, marginTop:2}}>
+                    {jammed ? "JAMMED" : inMotion ? (l.state === "locking" ? "Locking…" : "Unlocking…") : locked ? "Locked" : "Unlocked"}
+                    {l.door && ` · Door ${l.door}`}
+                    {l.battery != null && ` · ${l.battery}%`}
+                  </div>
+                </div>
+                <button onClick={()=>!edit && lockAction(l)} disabled={inMotion}
+                  style={{ flexShrink:0, minWidth:96, padding:"12px 16px", borderRadius:12, fontSize:14, fontWeight:800,
+                    cursor: edit||inMotion ? "default" : "pointer", opacity: inMotion ? 0.6 : 1,
+                    background: locked ? C.cardHi : C.accent,
+                    color: locked ? C.text : "#0c0e13",
+                    border: `1px solid ${locked ? C.edge : C.accent}` }}>
+                  {locked ? "Unlock" : "Lock"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </Tile>
+    ),
     devices: (
       <Tile title="Devices" edit={edit} onToggleVisible={()=>setVisible("devices",false)}>
-        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:7, marginBottom:8}}>
+        <div style={{display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: isMobile ? 9 : 7, marginBottom:8}}>
           {devices.map((d)=>(
-            <button key={d.entity_id} onClick={()=>!edit && toggleDevice(d)} style={{ display:"flex", alignItems:"center", gap:7, background: d.on&&d.kind!=="monitor"?"rgba(107,138,253,0.15)":C.cardHi, border:`1px solid ${d.kind==="lock" ? (d.on?C.open:C.secure) : d.on&&d.kind!=="monitor"?C.accent:C.edge}`, borderRadius:10, padding:"8px 9px", cursor: d.kind==="monitor"||edit?"default":"pointer", color:C.text, textAlign:"left" }}>
-              {d.kind==="light" && <Lightbulb size={15} color={d.on?C.motion:C.subDim}/>}
-              {d.kind==="switch" && <Zap size={15} color={d.on?C.secure:C.subDim}/>}
-              {d.kind==="lock" && (d.lockState==="locked"
-                ? <Lock size={15} color={C.secure}/>
-                : <Unlock size={15} color={C.open}/>)}
-              {d.kind==="monitor" && <Wifi size={15} color={C.secure}/>}
-              {d.kind==="lock" ? (
-                <span style={{minWidth:0}}>
-                  <span style={{display:"block", fontSize:11, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
-                  <span style={{display:"block", fontSize:9.5, color:C.sub, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.sub}</span>
-                </span>
-              ) : (
-                <span style={{fontSize:11, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
-              )}
+            <button key={d.entity_id} onClick={()=>!edit && toggleDevice(d)} style={{ display:"flex", alignItems:"center", gap:7, background: d.on&&d.kind!=="monitor"?"rgba(107,138,253,0.15)":C.cardHi, border:`1px solid ${d.on&&d.kind!=="monitor"?C.accent:C.edge}`, borderRadius:10, padding: isMobile ? "12px 11px" : "8px 9px", cursor: d.kind==="monitor"||edit?"default":"pointer", color:C.text, textAlign:"left" }}>
+              {d.kind==="light" && <Lightbulb size={isMobile?17:15} color={d.on?C.motion:C.subDim}/>}
+              {d.kind==="switch" && <Zap size={isMobile?17:15} color={d.on?C.secure:C.subDim}/>}
+              {d.kind==="monitor" && <Wifi size={isMobile?17:15} color={C.secure}/>}
+              <span style={{fontSize: isMobile?12:11, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
             </button>
           ))}
         </div>
@@ -839,7 +901,12 @@ export default function WallPanel() {
             </span>
           )}
         </div>
-        {!isMobile && (
+        {isMobile ? (
+          <button onClick={()=>setArrange(a=>!a)} aria-label="Arrange cards"
+            style={{ display:"flex", alignItems:"center", gap:6, background: arrange?C.accent:C.cardHi, color: arrange?C.bg0:C.sub, border:`1px solid ${arrange?C.accent:C.edge}`, borderRadius:10, padding:"8px 11px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+            <Settings2 size={14}/>{arrange?"Done":"Arrange"}
+          </button>
+        ) : (
           <div style={{display:"flex", alignItems:"center", gap:8}}>
             <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
               <Settings2 size={17}/>{edit?"Done":"Edit"}
@@ -868,15 +935,23 @@ export default function WallPanel() {
       {/* grid (desktop) / stack (mobile) — CSS decides which shows, so it
           can't be wrong regardless of how the PWA reports viewport size */}
       <div className="panel-stack-mobile" style={{ flexDirection:"column", gap:14, paddingBottom:8, width:"100%" }}>
-        {Object.keys(layout).filter(id => layout[id].visible)
-          .sort((a,b) => (layout[a].y - layout[b].y) || (layout[a].x - layout[b].x))
-          .map(id => {
+        {mobileIds(layout).map((id, idx, arr) => {
             const fixed = (id === "board" || id === "radar") ? 320 : null;
             return (
               <div key={id} style={fixed
                 ? { height:fixed, width:"100%", flexShrink:0, position:"relative", touchAction:"pan-y" }
                 : { width:"100%", flexShrink:0, position:"relative" }}>
                 {tileContent[id]}
+                {arrange && (
+                  <div style={{ position:"absolute", inset:0, background:"rgba(10,12,18,0.55)", borderRadius:16,
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:10, zIndex:5 }}>
+                    <span style={{fontSize:13, fontWeight:800, color:C.text, marginRight:6}}>{TILE_META[id].label}</span>
+                    <button onClick={()=>moveMobile(id,-1)} disabled={idx===0} aria-label="Move up"
+                      style={{ width:46, height:46, borderRadius:12, border:`1px solid ${C.edge}`, background:C.card, color: idx===0?C.subDim:C.text, fontSize:20, fontWeight:800, cursor: idx===0?"default":"pointer" }}>↑</button>
+                    <button onClick={()=>moveMobile(id,1)} disabled={idx===arr.length-1} aria-label="Move down"
+                      style={{ width:46, height:46, borderRadius:12, border:`1px solid ${C.edge}`, background:C.card, color: idx===arr.length-1?C.subDim:C.text, fontSize:20, fontWeight:800, cursor: idx===arr.length-1?"default":"pointer" }}>↓</button>
+                  </div>
+                )}
               </div>
             );
           })}
