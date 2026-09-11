@@ -214,7 +214,7 @@ function FamilyTab({ family, users, busy, act }: { family: Family[]; users: User
 
 // ---------------------------------------------------------------- Devices
 function DevicesTab({ placements, entities, busy, act }: { placements: Placement[]; entities: Entity[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
-  const placed = new Set(placements.map((p) => p.entity_id));
+  const placed = new Set(placements.map((p) => p.entity_id.replace(/#\d+$/, "")));
   // Placeable on the board: security sensors, locks, and lights/switches
   // (lights render as glow markers). Grouped in the dropdown below.
   const placeable = entities.filter(
@@ -245,11 +245,39 @@ function DevicesTab({ placements, entities, busy, act }: { placements: Placement
             <th className={`${th} w-20`}></th>
           </tr></thead>
           <tbody>
-            {placements.map((p) => {
+            {placements.filter((p) => !/#\d+$/.test(p.entity_id)).map((p) => {
               const ent = entities.find((e) => e.entity_id === p.entity_id);
+              const isLight = ent?.domain === "switch" || ent?.domain === "light";
+              const fixtures = 1 + placements.filter((q) => q.entity_id.startsWith(`${p.entity_id}#`)).length;
+              // Fixture count: one marker per physical light on this circuit.
+              // Extra fixtures are sibling placements "entity#2..#N", created
+              // near the base marker and then dragged into place on the board.
+              const setFixtures = async (n: number) => {
+                const want = Math.max(1, Math.min(8, n));
+                for (let i = 2; i <= 8; i++) {
+                  const fid = `${p.entity_id}#${i}`;
+                  const exists = placements.some((q) => q.entity_id === fid);
+                  if (i <= want && !exists) {
+                    await api(`/api/placements/${encodeURIComponent(fid)}`, { method: "PUT", body: JSON.stringify({
+                      entity_id: fid, room: p.room, floor: p.floor, x: (p.x ?? 0) + 0.6 * (i - 1), y: p.y ?? 0, icon: null }) });
+                  } else if (i > want && exists) {
+                    await api(`/api/placements/${encodeURIComponent(fid)}`, { method: "DELETE" });
+                  }
+                }
+                return new Response(null, { status: 204 });
+              };
               return (
                 <tr key={p.id} className="border-b border-line/60 last:border-0 align-top">
-                  <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] break-all">{p.entity_id}</td>
+                  <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] break-all">
+                    {p.entity_id}
+                    {isLight && (
+                      <span className="mt-1 flex items-center gap-1.5 text-[11px] font-sans text-ink-muted">
+                        Fixtures
+                        <input className={`${input} w-14 py-0.5`} type="number" min={1} max={8} defaultValue={fixtures}
+                          onBlur={(e) => Number(e.target.value) !== fixtures && act(() => setFixtures(Number(e.target.value)))} />
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     <input className={`${input} w-full py-1`} defaultValue={p.room} onBlur={(e) => e.target.value !== p.room && save(p, { room: e.target.value })} />
                   </td>
@@ -265,7 +293,12 @@ function DevicesTab({ placements, entities, busy, act }: { placements: Placement
                          : <span className="text-ink-muted">offline</span>}
                   </td>
                   <td className="px-3 py-2">
-                    <button disabled={busy} className={btn} onClick={() => window.confirm(`Remove placement for ${p.entity_id}?`) && act(() => api(`/api/placements/${p.entity_id}`, { method: "DELETE" }))}>Remove</button>
+                    <button disabled={busy} className={btn} onClick={() => window.confirm(`Remove placement for ${p.entity_id}?`) && act(async () => {
+                      for (const q of placements.filter((q) => q.entity_id === p.entity_id || q.entity_id.startsWith(`${p.entity_id}#`))) {
+                        await api(`/api/placements/${encodeURIComponent(q.entity_id)}`, { method: "DELETE" });
+                      }
+                      return new Response(null, { status: 204 });
+                    })}>Remove</button>
                   </td>
                 </tr>
               );

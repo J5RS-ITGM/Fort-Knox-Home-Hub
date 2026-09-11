@@ -60,6 +60,10 @@ const ROOMS = {
 };
 
 
+// "#n" placement ids are extra fixtures of one switch (multi-light
+// circuits): switch.garage_lights#2 is fixture 2 of switch.garage_lights.
+const baseEntity = (id) => String(id).replace(/#\d+$/, "");
+
 function typeFor(entity) {
   const dom = String(entity?.domain ?? entity?.entity_id?.split(".")[0] ?? "");
   if (dom === "switch" || dom === "light") return "light";
@@ -219,14 +223,29 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
 
       const drop = new THREE.Mesh(
         new THREE.CylinderGeometry(0.015,0.015,0.5,6),
-        new THREE.MeshBasicMaterial({ color:hx(C.secure), transparent:true, opacity:0.5 })
+        new THREE.MeshBasicMaterial({ color:hx(C.secure), transparent:true, opacity: isLight ? 0.0 : 0.5 })
       );
       drop.position.y = -0.25; grp.add(drop);
 
-      const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(rad, 20, 20),
-        new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 })
-      );
+      let sphere, bulb = null;
+      if (isLight) {
+        // sconce: downward cone shade + bulb that lights when on
+        sphere = new THREE.Mesh(
+          new THREE.ConeGeometry(rad, rad*1.2, 20),
+          new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.4 })
+        );
+        sphere.rotation.x = Math.PI;
+        bulb = new THREE.Mesh(
+          new THREE.SphereGeometry(rad*0.4, 12, 12),
+          new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 })
+        );
+        bulb.position.y = -rad*0.75; grp.add(bulb);
+      } else {
+        sphere = new THREE.Mesh(
+          new THREE.SphereGeometry(rad, 20, 20),
+          new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 })
+        );
+      }
       sphere.userData.sensorId = s.entity_id;
       grp.add(sphere);
 
@@ -249,7 +268,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       }
 
       scene.add(grp);
-      markerMeshes.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sphere, drop, ring, glow });
+      markerMeshes.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sphere, drop, ring, glow, bulb });
     });
 
     // plan features (doors / windows / garage door) with entity bindings
@@ -467,6 +486,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
           const lit = l?.state === "lit";
           m.glow.material.opacity += ((lit ? 0.22 + Math.sin(t*1.5)*0.04 : 0) - m.glow.material.opacity) * 0.15;
           m.glow.visible = m.glow.material.opacity > 0.01;
+          if (m.bulb) m.bulb.material.opacity += ((lit ? 0.9 : 0) - m.bulb.material.opacity) * 0.15;
         }
 
         const showRing = alert || selected === m.id;
@@ -711,8 +731,18 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
                   {alert && <animate attributeName="r" values="18;26;18" dur="1.4s" repeatCount="indefinite"/>}
                 </circle>
               )}
-              <circle cx={px} cy={py} r={12} fill={col} opacity={0.25}/>
-              <circle cx={px} cy={py} r={s.type === "light" ? 6 : 7} fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 2 : 0}/>
+              {s.type === "light" ? (
+                <g>
+                  {/* sconce: shade + stem + bulb */}
+                  <path d={`M ${px-8} ${py-2} A 8 8 0 0 1 ${px+8} ${py-2} L ${px+5} ${py-2} A 5 5 0 0 0 ${px-5} ${py-2} Z`}
+                        fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 1.5 : 0}/>
+                  <rect x={px-1.2} y={py-12} width={2.4} height={5} rx={1.2} fill={col} opacity={0.8}/>
+                  <circle cx={px} cy={py+3} r={lit ? 4.5 : 3} fill={lit ? col : "#39404f"}/>
+                </g>
+              ) : (<>
+                <circle cx={px} cy={py} r={12} fill={col} opacity={0.25}/>
+                <circle cx={px} cy={py} r={7} fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 2 : 0}/>
+              </>)}
               {(edit || isSel) && (
                 <text x={px} y={py - 16} fill={C.text} fontSize="14" textAnchor="middle"
                       style={{ paintOrder:"stroke", stroke:"#000", strokeWidth:3, pointerEvents:"none" }}>
@@ -903,7 +933,7 @@ export default function SecurityBoard() {
 
   // placed entity ids
   const placedIds = useMemo(
-    () => new Set((placements ?? []).map(p => p.entity_id)),
+    () => new Set((placements ?? []).map(p => baseEntity(p.entity_id))),
     [placements]
   );
 
@@ -948,7 +978,7 @@ export default function SecurityBoard() {
     if (!plan) return plan;
     const contacts = (placements ?? [])
       .filter(p => p.floor === 0)
-      .map(p => ({ p, e: entities.get(p.entity_id) }))
+      .map(p => ({ p, e: entities.get(baseEntity(p.entity_id)) }))
       .filter(({ e }) => e && typeFor(e) === "contact");
     const features = (plan.features ?? []).map(f => {
       if (f.entity && entities.has(f.entity)) return f;
@@ -957,7 +987,7 @@ export default function SecurityBoard() {
       contacts.forEach(({ p }) => {
         const { px, py } = planFromGrid(p.x, p.y);
         const d = Math.hypot(px - fx, py - fy);
-        if (d < bestD) { best = p.entity_id; bestD = d; }
+        if (d < bestD) { best = baseEntity(p.entity_id); bestD = d; }
       });
       return best ? { ...f, entity: best } : { ...f, entity: "" };
     });
@@ -968,14 +998,15 @@ export default function SecurityBoard() {
   const sensors = useMemo(() => {
     if (!placements) return [];
     return placements.map(p => {
-      const e = entities.get(p.entity_id);
+      const e = entities.get(baseEntity(p.entity_id));
+      const fix = p.entity_id.match(/#(\d+)$/);
       return {
         entity_id: p.entity_id,
         floor: p.floor,
         x: p.x,
         z: p.y, // placement y == plan depth == scene z
         type: typeFor(e),
-        label: labelFor(e, p),
+        label: labelFor(e, p) + (fix ? ` · ${fix[1]}` : ""),
         room: p.room,
       };
     });
@@ -983,7 +1014,7 @@ export default function SecurityBoard() {
 
   const liveState = useMemo(() => {
     const s = {};
-    sensors.forEach(x => { s[x.entity_id] = liveFor(x.type, entities.get(x.entity_id)); });
+    sensors.forEach(x => { s[x.entity_id] = liveFor(x.type, entities.get(baseEntity(x.entity_id))); });
     // plan features (doors/garage door) bind to contact sensors by entity id
     (resolvedPlan?.features ?? []).forEach(f => {
       if (f.entity && !s[f.entity]) s[f.entity] = liveFor("contact", entities.get(f.entity));

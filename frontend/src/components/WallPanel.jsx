@@ -53,7 +53,8 @@ function boardStateFor(sensor, entity) {
   if (!entity) return undefined; // offline / not yet loaded
   const on = entity.state === "on";
   let state = "secure";
-  if (sensor.type === "motion") state = on ? "motion" : "secure";
+  if (sensor.type === "light") state = on ? "lit" : "dark"; // lights are never "open"
+  else if (sensor.type === "motion") state = on ? "motion" : "secure";
   else if (sensor.type === "smoke") state = on ? "triggered" : "secure";
   else state = on ? "open" : "secure"; // contact + leak: on == open/WET
   const battery = typeof entity.attributes?.battery === "number" ? entity.attributes.battery : 100;
@@ -62,6 +63,7 @@ function boardStateFor(sensor, entity) {
 
 function colorFor(type, live, armed) {
   if (!live) return C.offline;
+  if (type === "light") return live.state === "lit" ? C.motion : "#525a6e";
   if (live.battery <= 15) return C.amber;
   if (live.state === "open" || live.state === "triggered") return C.open;
   if (live.state === "motion") return armed ? C.open : C.motion;
@@ -70,6 +72,7 @@ function colorFor(type, live, armed) {
 
 function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, themeTick }) {
   const mountRef = useRef();
+  const zoomApi = useRef(null);
   useEffect(() => {
     const mount = mountRef.current;
     let W = mount.clientWidth, H = mount.clientHeight;
@@ -77,7 +80,20 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     const scene = new THREE.Scene();
     const d = 7.2, aspect = W/H;
     const cam = new THREE.OrthographicCamera(-d*aspect, d*aspect, d, -d, 0.1, 100);
-    cam.position.set(11,12,11); cam.lookAt(0,1.4,0);
+    // Fill the tile: start zoomed so the model uses the space, and let the
+    // user wheel / pinch / button-zoom and drag-pan from there.
+    let zoom = 1.5;
+    const target = new THREE.Vector3(0, 1.4, 0);
+    const applyCam = () => {
+      cam.zoom = zoom;
+      cam.position.set(target.x + 11, 12, target.z + 11);
+      cam.lookAt(target.x, 1.4, target.z);
+      cam.updateProjectionMatrix();
+    };
+    applyCam();
+    const setZoom = (z) => { zoom = Math.min(4, Math.max(0.6, z)); applyCam(); };
+    zoomApi.current = { in: () => setZoom(zoom * 1.25), out: () => setZoom(zoom / 1.25),
+      reset: () => { target.set(0, 1.4, 0); setZoom(1.5); } };
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
     renderer.setSize(W,H); mount.appendChild(renderer.domElement); renderer.domElement.style.touchAction="pan-y";
@@ -135,16 +151,28 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     });
 
     // Markers: live placements (grid coords, y->z), same as the board.
+    // Lights render as little lamps (cone shade + bulb + floor glow), not pins.
     const markers = [];
     (placements ?? []).forEach(s => {
       const y = s.floor*2.4 + 0.55; const grp = new THREE.Group(); grp.position.set(s.x,y,s.y);
-      const drop = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,0.5,6), new THREE.MeshBasicMaterial({ color:hx(C.secure), transparent:true, opacity:0.5 }));
-      drop.position.y=-0.25; grp.add(drop);
-      const sph = new THREE.Mesh(new THREE.SphereGeometry(0.26,20,20), new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 }));
-      grp.add(sph);
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.36,0.46,32), new THREE.MeshBasicMaterial({ color:hx(C.open), transparent:true, opacity:0.55, side:THREE.DoubleSide }));
-      ring.rotation.x=-Math.PI/2; ring.position.y=-0.22; ring.visible=false; grp.add(ring);
-      scene.add(grp); markers.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sph, drop, ring });
+      const isLight = s.type === "light";
+      let sph, drop = null, ring = null, glow = null, bulb = null;
+      if (isLight) {
+        sph = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.26, 20), new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.4 }));
+        sph.rotation.x = Math.PI; grp.add(sph); // shade opening downward
+        bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 }));
+        bulb.position.y = -0.16; grp.add(bulb);
+        glow = new THREE.Mesh(new THREE.CircleGeometry(0.8, 36), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false }));
+        glow.rotation.x = -Math.PI/2; glow.position.y = -0.53; grp.add(glow);
+      } else {
+        drop = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,0.5,6), new THREE.MeshBasicMaterial({ color:hx(C.secure), transparent:true, opacity:0.5 }));
+        drop.position.y=-0.25; grp.add(drop);
+        sph = new THREE.Mesh(new THREE.SphereGeometry(0.26,20,20), new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 }));
+        grp.add(sph);
+        ring = new THREE.Mesh(new THREE.RingGeometry(0.36,0.46,32), new THREE.MeshBasicMaterial({ color:hx(C.open), transparent:true, opacity:0.55, side:THREE.DoubleSide }));
+        ring.rotation.x=-Math.PI/2; ring.position.y=-0.22; ring.visible=false; grp.add(ring);
+      }
+      scene.add(grp); markers.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sph, drop, ring, glow, bulb });
     });
 
     let raf, t=0;
@@ -154,7 +182,16 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
       floorGroups[1].visible = floorView==="all"||floorView===1;
       markers.forEach(m=>{
         const vis = floorView==="all"||floorView===m.floor; m.grp.visible=vis; if(!vis)return;
-        const l=live[m.id]; const chex=colorFor(m.type,l,armed); const col=hx(chex); const alert=chex===C.open;
+        const l=live[m.id]; const chex=colorFor(m.type,l,armed); const col=hx(chex);
+        if (m.type === "light") {
+          const lit = l?.state === "lit";
+          m.sph.material.color.copy(col); m.sph.material.emissive.copy(col);
+          m.sph.material.emissiveIntensity = lit ? 0.9 : 0.35;
+          if (m.bulb) m.bulb.material.opacity += ((lit ? 0.9 : 0) - m.bulb.material.opacity) * 0.15;
+          if (m.glow) { m.glow.material.opacity += ((lit ? 0.22 + Math.sin(t*1.5)*0.04 : 0) - m.glow.material.opacity) * 0.15; m.glow.visible = m.glow.material.opacity > 0.01; }
+          return;
+        }
+        const alert=chex===C.open;
         m.sph.material.color.copy(col); m.sph.material.emissive.copy(col); m.sph.material.emissiveIntensity=alert?1.4:0.5;
         m.drop.material.color.copy(col); m.sph.scale.setScalar(alert?1+Math.sin(t*4)*0.18:1);
         m.ring.visible=alert; if(alert) m.ring.material.color.copy(col);
@@ -164,9 +201,55 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     animate();
     function onResize(){ W=mount.clientWidth||W; H=mount.clientHeight||H; const a=W/H; cam.left=-d*a; cam.right=d*a; cam.top=d; cam.bottom=-d; cam.updateProjectionMatrix(); renderer.setSize(W,H); }
     const ro=new ResizeObserver(onResize); ro.observe(mount);
-    return ()=>{ cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); if(renderer.domElement.parentNode) mount.removeChild(renderer.domElement); };
+    // wheel zoom + drag pan + pinch on the panel board
+    const panRight = new THREE.Vector3(1, 0, -1).normalize();
+    const panUp = new THREE.Vector3(-1, 0, -1).normalize();
+    const onWheel = (e) => { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0012)); };
+    const pointers = new Map(); let pinchDist = 0, panning = null;
+    const onPD = (e) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) { const [a,b]=[...pointers.values()]; pinchDist=Math.hypot(a.x-b.x,a.y-b.y); panning=null; return; }
+      panning = { x: e.clientX, y: e.clientY }; renderer.domElement.setPointerCapture(e.pointerId);
+    };
+    const onPM = (e) => {
+      if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) { const [a,b]=[...pointers.values()]; const dist=Math.hypot(a.x-b.x,a.y-b.y);
+        if (pinchDist>0) setZoom(zoom*(dist/pinchDist)); pinchDist=dist; return; }
+      if (!panning) return;
+      const worldPerPx = (cam.right - cam.left) / cam.zoom / W;
+      target.addScaledVector(panRight, -(e.clientX - panning.x) * worldPerPx);
+      target.addScaledVector(panUp, (e.clientY - panning.y) * worldPerPx * 1.35);
+      target.x = Math.max(-8, Math.min(8, target.x)); target.z = Math.max(-8, Math.min(8, target.z));
+      applyCam(); panning = { x: e.clientX, y: e.clientY };
+    };
+    const onPU = (e) => { pointers.delete(e.pointerId); if (pointers.size < 2) pinchDist = 0; panning = null; };
+    renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
+    renderer.domElement.addEventListener("pointerdown", onPD);
+    renderer.domElement.addEventListener("pointermove", onPM);
+    renderer.domElement.addEventListener("pointerup", onPU);
+    renderer.domElement.addEventListener("pointercancel", onPU);
+    renderer.domElement.style.touchAction = "none";
+    return ()=>{ cancelAnimationFrame(raf); ro.disconnect();
+      renderer.domElement.removeEventListener("wheel", onWheel);
+      renderer.domElement.removeEventListener("pointerdown", onPD);
+      renderer.domElement.removeEventListener("pointermove", onPM);
+      renderer.domElement.removeEventListener("pointerup", onPU);
+      renderer.domElement.removeEventListener("pointercancel", onPU);
+      zoomApi.current = null;
+      renderer.dispose(); if(renderer.domElement.parentNode) mount.removeChild(renderer.domElement); };
   }, [floorView, plan, placements, labels, liveStateRef, armedRef, themeTick]);
-  return <div ref={mountRef} style={{ width:"100%", height:"100%", touchAction:"pan-y" }} />;
+  const zb = { width:34, height:34, display:"grid", placeItems:"center", background:"rgba(15,17,22,0.8)",
+    color:C.text, fontSize:16, fontWeight:700, border:`1px solid ${C.edge}`, borderRadius:9, cursor:"pointer" };
+  return (
+    <div style={{ width:"100%", height:"100%", position:"relative" }}>
+      <div ref={mountRef} style={{ width:"100%", height:"100%", touchAction:"none" }} />
+      <div style={{ position:"absolute", right:10, bottom:10, display:"flex", flexDirection:"column", gap:6, zIndex:3 }}>
+        <button style={zb} aria-label="Zoom in" onClick={()=>zoomApi.current?.in()}>+</button>
+        <button style={zb} aria-label="Zoom out" onClick={()=>zoomApi.current?.out()}>−</button>
+        <button style={{...zb, fontSize:12}} aria-label="Reset view" onClick={()=>zoomApi.current?.reset()}>⤾</button>
+      </div>
+    </div>
+  );
 }
 
 // ================= RADAR (live — RainViewer via backend proxy) ================
@@ -389,20 +472,23 @@ function ClockStrip() {
 
 // ================= LAYOUT =====================
 const GRID_COLS = 12;
-// Each tile: desktop grid slot (x,y,w,h), visibility, and `m` = mobile stack
-// order (independent of the desktop grid so phones can arrange their own
-// sequence). Lock defaults near the top on mobile — it's an action card.
+// v2 layout: row 0 is a compact clock strip (fixed px), rows 1..6 share the
+// remaining viewport so nothing falls below the fold. Board gets the full
+// left half; radar is hidden by default (the Weather tile has a radar
+// button). Each tile: desktop slot (x,y,w,h), visibility, and `m` = mobile
+// stack order.
+const LAYOUT_V = 2;
 const DEFAULT_LAYOUT = {
-  clock:   { x:0, y:0, w:12, h:1, visible:true, m:0 },
-  lock:    { x:4, y:5, w:2, h:2, visible:true, m:1 },
-  garage:  { x:6, y:5, w:2, h:2, visible:true, m:2 },
-  board:   { x:0, y:1, w:6, h:4, visible:true, m:3 },
+  clock:   { x:0, y:0, w:12, h:1, visible:true, m:0, _v:LAYOUT_V },
+  board:   { x:0, y:1, w:6, h:6, visible:true, m:3 },
   weather: { x:6, y:1, w:3, h:2, visible:true, m:4 },
-  radar:   { x:9, y:1, w:3, h:2, visible:true, m:5 },
-  climate: { x:6, y:3, w:3, h:2, visible:true, m:6 },
-  calendar:{ x:9, y:3, w:3, h:2, visible:true, m:7 },
-  devices: { x:0, y:5, w:4, h:2, visible:true, m:8 },
-  tasks:   { x:8, y:5, w:4, h:2, visible:true, m:9 },
+  calendar:{ x:9, y:1, w:3, h:2, visible:true, m:7 },
+  climate: { x:6, y:3, w:3, h:1, visible:true, m:6 },
+  lock:    { x:9, y:3, w:3, h:1, visible:true, m:1 },
+  garage:  { x:6, y:4, w:3, h:1, visible:true, m:2 },
+  tasks:   { x:9, y:4, w:3, h:3, visible:true, m:8 },
+  devices: { x:6, y:5, w:3, h:2, visible:true, m:5 },
+  radar:   { x:9, y:1, w:3, h:2, visible:false, m:9 },
 };
 const TILE_META = {
   clock:{label:"Clock"}, lock:{label:"Locks"}, garage:{label:"Garage"}, board:{label:"Home Map"}, weather:{label:"Weather"}, radar:{label:"Radar"},
@@ -412,10 +498,11 @@ const LS_KEY = "homehub.wallpanel.layout.v2";
 const PANEL_KEY = "wallpanel";
 
 // ================= TILE SHELL =====================
-function Tile({ title, children, edit, onToggleVisible, style }) {
+function Tile({ title, children, edit, onToggleVisible, style, fit }) {
   return (
     <div style={{ background:C.card, border:`1px solid ${C.edge}`, borderRadius:16, padding:16,
-      display:"flex", flexDirection:"column", minHeight:0, height:"100%", overflow:"hidden",
+      display:"flex", flexDirection:"column", minHeight:0, height: fit ? "fit-content" : "100%",
+      maxHeight:"100%", overflow:"hidden",
       position:"relative", ...style }}>
       {title && (
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
@@ -467,7 +554,12 @@ export default function WallPanel() {
     return () => { cancelled = true; };
   }, []);
 
+  // "#n" suffixes are extra fixtures of one switch (multi-light circuits):
+  // switch.garage_lights#2 is fixture 2 driven by switch.garage_lights.
+  const baseEntity = (id) => id.replace(/#\d+$/, "");
   const typeOf = (entity) => {
+    const dom = String(entity?.domain ?? "");
+    if (dom === "switch" || dom === "light") return "light";
     const dc = String(entity?.attributes?.device_class ?? "");
     if (dc === "motion" || dc === "occupancy") return "motion";
     if (dc === "moisture") return "leak";
@@ -475,14 +567,14 @@ export default function WallPanel() {
     return "contact";
   };
   const placements = useMemo(
-    () => placementRows.map((p) => ({ ...p, type: typeOf(entities.get(p.entity_id)) })),
+    () => placementRows.map((p) => ({ ...p, type: typeOf(entities.get(baseEntity(p.entity_id))) })),
     [placementRows, entities]
   );
   const labels = useMemo(() => defaultLabels(plan, ROOMS, boardLabels), [plan, boardLabels]);
 
   const liveState = useMemo(() => {
     const s = {};
-    placements.forEach(x => { s[x.entity_id] = boardStateFor(x, entities.get(x.entity_id)); });
+    placements.forEach(x => { s[x.entity_id] = boardStateFor(x, entities.get(baseEntity(x.entity_id))); });
     return s;
   }, [placements, entities]);
 
@@ -571,10 +663,18 @@ export default function WallPanel() {
   });
 
   // ---- layout: server-backed with localStorage fallback --------------------
-  // Saved layouts predate newly shipped tiles (e.g. clock, lock): merge
-  // defaults underneath so new tiles appear without wiping user
-  // arrangements, and backfill the mobile-order field on older saves.
+  // Saved layouts: v2 replaces the tile geometry with the optimized grid
+  // (one-time migration keyed on clock._v) while preserving the user's
+  // garage relay/sensor picks and hidden-device list. Post-migration saves
+  // merge normally so custom arrangements stick.
   const withNewTiles = (saved) => {
+    if (!saved || saved.clock?._v !== LAYOUT_V) {
+      return {
+        ...DEFAULT_LAYOUT,
+        garage: { ...DEFAULT_LAYOUT.garage, relay: saved?.garage?.relay, sensor: saved?.garage?.sensor },
+        devices: { ...DEFAULT_LAYOUT.devices, hidden: saved?.devices?.hidden ?? [] },
+      };
+    }
     const merged = { ...DEFAULT_LAYOUT, ...saved };
     for (const id of Object.keys(merged)) {
       if (merged[id].m == null) merged[id] = { ...merged[id], m: DEFAULT_LAYOUT[id]?.m ?? 99 };
@@ -619,29 +719,45 @@ export default function WallPanel() {
   // so a fresh install works in mock mode.
   const garageCfg = useMemo(() => {
     const g = layout.garage ?? {};
-    const bySuffix = (dom, frag) => {
+    const bySuffix = (doms, frag) => {
       for (const e of entities.values())
-        if (e.domain === dom && e.entity_id.includes(frag)) return e.entity_id;
+        if (doms.includes(e.domain) && e.entity_id.includes(frag)) return e.entity_id;
       return "";
     };
+    // prefer a cover-domain opener when one exists (real GDO integrations
+    // expose cover.*); fall back to the ZEN16 relay switch
     return {
-      relay: g.relay ?? bySuffix("switch", "garage_door_relay"),
-      sensor: g.sensor ?? bySuffix("binary_sensor", "garage_door"),
+      relay: g.relay ?? (bySuffix(["cover"], "garage") || bySuffix(["switch"], "garage_door_relay")),
+      sensor: g.sensor ?? bySuffix(["binary_sensor"], "garage_door"),
     };
   }, [layout.garage, entities]);
   const setGarageCfg = (patch) => setLayout(prev => ({ ...prev, garage: { ...prev.garage, ...patch } }));
 
   const garageDoor = useMemo(() => {
+    const opener = garageCfg.relay ? entities.get(garageCfg.relay) : null;
+    const isCover = opener?.domain === "cover";
     const sensor = garageCfg.sensor ? entities.get(garageCfg.sensor) : null;
-    const relay = garageCfg.relay ? entities.get(garageCfg.relay) : null;
-    const state = !sensor || sensor.state === "unavailable" ? null : sensor.state === "on" ? "open" : "closed";
-    return { state, relayOk: !!relay, relayBusy: relay?.state === "on" };
+    // state priority: explicit sensor, else the cover's own open/closed
+    let state = null, moving = false;
+    if (sensor && sensor.state !== "unavailable") state = sensor.state === "on" ? "open" : "closed";
+    else if (isCover && opener.state !== "unavailable") {
+      moving = opener.state === "opening" || opener.state === "closing";
+      state = opener.state === "open" || opener.state === "opening" ? "open"
+            : opener.state === "closed" || opener.state === "closing" ? "closed" : null;
+    }
+    return { state, moving, isCover, relayOk: !!opener };
   }, [entities, garageCfg]);
   const [garagePulsing, setGaragePulsing] = useState(false);
   const triggerGarage = async () => {
     if (!garageCfg.relay || garagePulsing) return;
     setGaragePulsing(true);
-    try { await callService("switch", "turn_on", garageCfg.relay); } catch (e) { console.error(e); }
+    try {
+      if (garageDoor.isCover) {
+        await callService("cover", garageDoor.state === "open" ? "close_cover" : "open_cover", garageCfg.relay);
+      } else {
+        await callService("switch", "turn_on", garageCfg.relay); // ZEN16 pulse
+      }
+    } catch (e) { console.error(e); }
     setTimeout(() => setGaragePulsing(false), 2500); // opener cycle debounce
   };
 
@@ -672,6 +788,7 @@ export default function WallPanel() {
   const summary = useMemo(()=>{
     let open=0,motion=0,low=0,offline=0;
     placements.forEach(s=>{
+      if(s.type==="light") return; // lights never count as open/offline
       const l=liveState[s.entity_id];
       if(!l){ offline++; return; }
       if(l.state==="open"||l.state==="triggered")open++;
@@ -711,15 +828,21 @@ export default function WallPanel() {
     const ro = new ResizeObserver(() => setGridSize({ w:el.clientWidth, h:el.clientHeight }));
     ro.observe(el); return () => ro.disconnect();
   }, []);
-  const ROWS = 6;
+  // Geometry: row 0 is a fixed compact strip (the clock); rows 1..6 divide
+  // the remaining grid height evenly, so the whole layout always fits the
+  // viewport with no dead band under the clock and nothing below the fold.
+  const ROW0_H = 72;
+  const UNIT_ROWS = 6;
   const cellW = gridSize.w / GRID_COLS;
-  const cellH = gridSize.h / ROWS;
+  const unitH = Math.max(80, (gridSize.h - ROW0_H) / UNIT_ROWS);
   const GAP = 12;
+  const rowTop = (y) => (y === 0 ? 0 : ROW0_H + (y - 1) * unitH);
+  const rowSpanH = (y, h) => (y === 0 ? ROW0_H + Math.max(0, h - 1) * unitH : h * unitH);
 
   const tileStyle = (l) => ({
     position:"absolute",
-    left: l.x*cellW + GAP/2, top: l.y*cellH + GAP/2,
-    width: l.w*cellW - GAP, height: l.h*cellH - GAP,
+    left: l.x*cellW + GAP/2, top: rowTop(l.y) + GAP/2,
+    width: l.w*cellW - GAP, height: rowSpanH(l.y, l.h) - GAP,
     transition: dragId.current ? "none" : "left .18s, top .18s, width .18s, height .18s",
   });
 
@@ -739,15 +862,15 @@ export default function WallPanel() {
   const onPointerMove = (e) => {
     const id = dragId.current; if (!id) return;
     const dx = Math.round((e.clientX - start.current.mx) / cellW);
-    const dy = Math.round((e.clientY - start.current.my) / cellH);
+    const dy = Math.round((e.clientY - start.current.my) / unitH);
     setLayout(prev => {
       const l = { ...prev[id] };
       if (mode.current === "move") {
         l.x = Math.max(0, Math.min(GRID_COLS - l.w, start.current.x + dx));
-        l.y = Math.max(0, Math.min(ROWS - l.h, start.current.y + dy));
+        l.y = Math.max(0, Math.min(1 + UNIT_ROWS - l.h, start.current.y + dy));
       } else {
         l.w = Math.max(2, Math.min(GRID_COLS - l.x, start.current.w + dx));
-        l.h = Math.max(1, Math.min(ROWS - l.y, start.current.h + dy));
+        l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, start.current.h + dy));
       }
       return { ...prev, [id]: l };
     });
@@ -794,6 +917,12 @@ export default function WallPanel() {
     ),
     weather: (
       <Tile title="Weather" edit={edit} onToggleVisible={()=>setVisible("weather",false)}>
+        <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
+          style={{ position:"absolute", top:10, right: edit ? 38 : 12, display:"flex", alignItems:"center", gap:6,
+            background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
+            padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer", zIndex:1 }}>
+          <Radar size={13}/> Radar
+        </button>
         <div style={{display:"flex", alignItems:"center", gap:12}}>
           <Sun size={40} color={C.motion}/>
           <div><div style={{fontSize:34, fontWeight:800, lineHeight:1}}>72°</div><div style={{fontSize:12, color:C.sub}}>Sunny · H76/L61</div></div>
@@ -819,12 +948,13 @@ export default function WallPanel() {
     ),
     climate: (
       <Tile title="Climate" edit={edit} onToggleVisible={()=>setVisible("climate",false)}>
-        <div style={{display:"flex", flexDirection:"column", gap:10, justifyContent:"center", height:"100%"}}>
+        <div style={{display:"flex", gap:22, alignItems:"center", height:"100%", flexWrap:"wrap"}}>
           {climateRows.length === 0 && <span style={{fontSize:12, color:C.sub}}>Waiting for climate entities…</span>}
           {climateRows.map(([room,temp,tgt])=>(
-            <div key={room} style={{display:"flex", alignItems:"baseline", justifyContent:"space-between"}}>
-              <div><div style={{fontSize:28, fontWeight:800, lineHeight:1}}>{temp}</div><div style={{fontSize:11, color:C.sub, marginTop:2}}>{room}</div></div>
-              <div style={{fontSize:12, color:C.accent, fontWeight:600}}>{tgt}</div>
+            <div key={room} style={{display:"flex", alignItems:"baseline", gap:8, minWidth:0}}>
+              <span style={{fontSize:26, fontWeight:800, lineHeight:1}}>{temp}</span>
+              <span style={{fontSize:11, color:C.sub}}>{room}</span>
+              <span style={{fontSize:11, color:C.accent, fontWeight:600}}>{tgt}</span>
             </div>
           ))}
         </div>
@@ -845,12 +975,18 @@ export default function WallPanel() {
       <Tile title="Garage" edit={edit} onToggleVisible={()=>setVisible("garage",false)}>
         {edit ? (
           <div style={{display:"flex", flexDirection:"column", gap:8, fontSize:11, color:C.sub}}>
-            <label>Opener relay
+            <label>Opener (relay or cover)
               <select value={garageCfg.relay} onChange={(e)=>setGarageCfg({relay:e.target.value})}
                 style={{width:"100%", marginTop:3, background:C.cardHi, color:C.text, border:`1px solid ${C.edge}`, borderRadius:8, padding:"7px 8px", fontSize:12}}>
                 <option value="">— none —</option>
-                {[...entities.values()].filter(e=>e.domain==="switch").map(e=>
-                  <option key={e.entity_id} value={e.entity_id}>{e.friendly_name}</option>)}
+                <optgroup label="Garage door openers (cover)">
+                  {[...entities.values()].filter(e=>e.domain==="cover").map(e=>
+                    <option key={e.entity_id} value={e.entity_id}>{e.friendly_name}</option>)}
+                </optgroup>
+                <optgroup label="Relay switches (ZEN16 pulse)">
+                  {[...entities.values()].filter(e=>e.domain==="switch").map(e=>
+                    <option key={e.entity_id} value={e.entity_id}>{e.friendly_name}</option>)}
+                </optgroup>
               </select>
             </label>
             <label>Door sensor
@@ -869,7 +1005,7 @@ export default function WallPanel() {
               <div style={{fontSize:14, fontWeight:700}}>Garage Door</div>
               <div style={{fontSize:11, color: garageDoor.state === "open" ? C.open : C.sub, marginTop:2}}>
                 {garageDoor.state === "open" ? "Open" : garageDoor.state === "closed" ? "Closed" : "No sensor"}
-                {garagePulsing && " · Moving…"}
+                {(garagePulsing || garageDoor.moving) && " · Moving…"}
               </div>
             </div>
             <button onClick={()=>triggerGarage()} disabled={!garageCfg.relay || garagePulsing}
@@ -961,8 +1097,8 @@ export default function WallPanel() {
       </Tile>
     ),
     tasks: (
-      <Tile title="Tasks" edit={edit} onToggleVisible={()=>setVisible("tasks",false)}>
-        <div style={{display:"flex", flexDirection:"column", gap:1, justifyContent:"center", height:"100%"}}>
+      <Tile title="Tasks" edit={edit} onToggleVisible={()=>setVisible("tasks",false)} fit>
+        <div style={{display:"flex", flexDirection:"column", gap:1}}>
           {tasks.length === 0 && <span style={{fontSize:13, color:C.sub}}>No open tasks.</span>}
           {tasks.map((t)=>(
             <div key={t.id} style={{display:"flex", alignItems:"center", gap:9, padding:"6px 0"}}>
@@ -1064,7 +1200,7 @@ export default function WallPanel() {
       </div>
 
       <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", minHeight:"calc(100dvh - 90px)",
-        background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${cellH-1}px, rgba(107,138,253,0.06) ${cellH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
+        background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${unitH-1}px, rgba(107,138,253,0.06) ${unitH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
         borderRadius:12 }}>
         {Object.keys(layout).filter(id => layout[id].visible).map(id => {
           const l = layout[id];
