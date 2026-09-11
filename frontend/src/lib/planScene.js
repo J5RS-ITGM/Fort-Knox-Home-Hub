@@ -165,6 +165,73 @@ export function buildPlanFloor(plan, y, floorIndex = 0) {
     beam.position.set(c.cx, y + WALL_H, c.cz);
     g.add(beam);
   });
+
+  // Typed features: doors, windows, and the garage door. Each is a rect in
+  // plan coordinates sitting on a wall centerline (w>h = horizontal wall).
+  // Feature meshes with an `entity` binding are exposed on g.userData so
+  // the board's render loop can live-color them (green closed / red open)
+  // and tilt the garage panel; unbound features keep these static colors.
+  const featureMeshes = [];
+  const FEAT_C = { door: 0x3fb98f, window: 0x5b9bd5, garage: 0x8a91a0 };
+  (plan.features ?? []).forEach((f) => {
+    const rr = gridRect(f);
+    const horiz = rr.w >= rr.d;
+    const span = horiz ? rr.w : rr.d;
+    if (f.type === "window") {
+      // half-height translucent pane set into the wall
+      const pane = new THREE.Mesh(
+        new THREE.BoxGeometry(horiz ? span : 0.1, WALL_H * 0.45, horiz ? 0.1 : span),
+        new THREE.MeshStandardMaterial({ color: FEAT_C.window, transparent: true, opacity: 0.4,
+          emissive: FEAT_C.window, emissiveIntensity: 0.3, roughness: 0.2 })
+      );
+      pane.position.set(rr.cx, y + WALL_H * 0.55, rr.cz);
+      g.add(pane);
+      featureMeshes.push({ id: f.id, type: f.type, entity: f.entity ?? "", mesh: pane });
+    } else if (f.type === "garage_door") {
+      // wide panel hinged at its top edge (geometry translated so rotation
+      // tilts it up like a real sectional door)
+      const geo = new THREE.BoxGeometry(horiz ? span : 0.09, WALL_H * 0.85, horiz ? 0.09 : span);
+      geo.translate(0, -WALL_H * 0.425, 0);
+      const panel = new THREE.Mesh(
+        geo,
+        new THREE.MeshStandardMaterial({ color: FEAT_C.garage, transparent: true, opacity: 0.85,
+          emissive: FEAT_C.garage, emissiveIntensity: 0.2, roughness: 0.6 })
+      );
+      panel.position.set(rr.cx, y + WALL_H * 0.9, rr.cz);
+      g.add(panel);
+      // rail lines at the panel edges so the door reads as a door
+      const railMat = new THREE.LineBasicMaterial({ color: new THREE.Color(PLAN_C.wallEdge) });
+      const rail = new THREE.LineSegments(new THREE.EdgesGeometry(geo), railMat);
+      rail.position.copy(panel.position);
+      panel.userData.railEdge = rail;
+      g.add(rail);
+      featureMeshes.push({ id: f.id, type: f.type, entity: f.entity ?? "", mesh: panel });
+    } else {
+      // hinged door: leaf set into the opening + swing arc etched on the floor
+      const leaf = new THREE.Mesh(
+        new THREE.BoxGeometry(horiz ? span : 0.08, WALL_H * 0.8, horiz ? 0.08 : span),
+        new THREE.MeshStandardMaterial({ color: FEAT_C.door, transparent: true, opacity: 0.8,
+          emissive: FEAT_C.door, emissiveIntensity: 0.25, roughness: 0.5 })
+      );
+      leaf.position.set(rr.cx, y + WALL_H * 0.4, rr.cz);
+      g.add(leaf);
+      const arcPts = [];
+      const swingIn = (f.swing ?? "in") === "in";
+      for (let i = 0; i <= 16; i++) {
+        const a = (i / 16) * (Math.PI / 2);
+        const r = span;
+        if (horiz) arcPts.push(new THREE.Vector3(rr.cx - span/2 + Math.cos(a)*r, y + 0.01, rr.cz + (swingIn ? -1 : 1) * Math.sin(a)*r));
+        else arcPts.push(new THREE.Vector3(rr.cx + (swingIn ? -1 : 1) * Math.sin(a)*r, y + 0.01, rr.cz - span/2 + Math.cos(a)*r));
+      }
+      const arc = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(arcPts),
+        new THREE.LineBasicMaterial({ color: FEAT_C.door, transparent: true, opacity: 0.35 })
+      );
+      g.add(arc);
+      featureMeshes.push({ id: f.id, type: f.type, entity: f.entity ?? "", mesh: leaf });
+    }
+  });
+  g.userData.featureMeshes = featureMeshes;
   return g;
 }
 

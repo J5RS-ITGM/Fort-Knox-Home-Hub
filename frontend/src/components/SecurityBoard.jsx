@@ -40,7 +40,7 @@ const hx = (h) => {
 const FLOOR_H = 3.6; // (retained for label drag math on legacy stacked refs)
 const SIDE_OFFSET = 9.0; // upstairs sits this far +X of the ground floor
 
-const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO" };
+const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO", light:"Light" };
 
 
 // rooms: [centerX, centerZ, width, depth, label] per floor (static demo plan)
@@ -61,6 +61,8 @@ const ROOMS = {
 
 
 function typeFor(entity) {
+  const dom = String(entity?.domain ?? entity?.entity_id?.split(".")[0] ?? "");
+  if (dom === "switch" || dom === "light") return "light";
   const dc = String(entity?.attributes?.device_class ?? "");
   if (dc === "motion" || dc === "occupancy") return "motion";
   if (dc === "moisture") return "leak";
@@ -75,7 +77,8 @@ function liveFor(type, entity) {
   if (!entity) return undefined; // offline / unknown to HA
   const on = entity.state === "on";
   let state = "secure";
-  if (type === "motion") state = on ? "motion" : "secure";
+  if (type === "light") state = on ? "lit" : "dark";
+  else if (type === "motion") state = on ? "motion" : "secure";
   else if (type === "smoke") state = on ? "triggered" : "secure";
   else state = on ? "open" : "secure";
   const battery = typeof entity.attributes?.battery === "number" ? entity.attributes.battery : 100;
@@ -83,6 +86,7 @@ function liveFor(type, entity) {
 }
 function colorFor(type, live, armed) {
   if (!live) return C.offline;
+  if (type === "light") return live.state === "lit" ? C.motion : "#525a6e";
   if (live.battery <= 15) return C.lowbat;
   if (live.state === "open" || live.state === "triggered") return C.open;
   if (live.state === "motion") return armed ? C.open : C.motion;
@@ -210,7 +214,8 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       const y = 0.5;
       const grp = new THREE.Group();
       grp.position.set(s.x + floorShiftX(s.floor), y, s.z);
-      const rad = narrow ? 0.30 : 0.22;
+      const isLight = s.type === "light";
+      const rad = (narrow ? 0.30 : 0.22) * (isLight ? 0.8 : 1);
 
       const drop = new THREE.Mesh(
         new THREE.CylinderGeometry(0.015,0.015,0.5,6),
@@ -232,9 +237,27 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       ring.rotation.x = -Math.PI/2; ring.position.y = -0.22; ring.visible = false;
       grp.add(ring);
 
+      // light pool: a soft glow disc on the floor plane, shown when lit
+      let glow = null;
+      if (isLight) {
+        glow = new THREE.Mesh(
+          new THREE.CircleGeometry(0.85, 40),
+          new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false })
+        );
+        glow.rotation.x = -Math.PI/2; glow.position.y = -0.485;
+        grp.add(glow);
+      }
+
       scene.add(grp);
-      markerMeshes.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sphere, drop, ring });
+      markerMeshes.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sphere, drop, ring, glow });
     });
+
+    // plan features (doors / windows / garage door) with entity bindings
+    // live-color from liveState; unbound features keep their static color.
+    const featureMeshes = [
+      ...(floor0.userData?.featureMeshes ?? []),
+      ...(floor1.userData?.featureMeshes ?? []).map(f => ({ ...f, floor: 1 })),
+    ];
 
     // Draggable room labels. Empty-text labels appear only in edit mode as
     // ghost placeholders ("tap to name") so unnamed rooms are discoverable.
@@ -440,9 +463,33 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         const pulse = alert ? 1 + Math.sin(t*4)*0.18 : edit ? 1 + Math.sin(t*2)*0.06 : 1;
         m.sphere.scale.setScalar(pulse);
 
+        if (m.glow) {
+          const lit = l?.state === "lit";
+          m.glow.material.opacity += ((lit ? 0.22 + Math.sin(t*1.5)*0.04 : 0) - m.glow.material.opacity) * 0.15;
+          m.glow.visible = m.glow.material.opacity > 0.01;
+        }
+
         const showRing = alert || selected === m.id;
         m.ring.visible = showRing;
         if (showRing) m.ring.material.color.copy(col);
+      });
+
+      featureMeshes.forEach(f => {
+        if (!f.entity || !f.mesh) return;
+        const l = live[f.entity];
+        const isOpen = l?.state === "open" || l?.state === "triggered";
+        const col = hx(!l ? C.offline : isOpen ? C.open : C.secure);
+        f.mesh.material.color.copy(col);
+        if (f.mesh.material.emissive) {
+          f.mesh.material.emissive.copy(col);
+          f.mesh.material.emissiveIntensity = isOpen ? 0.9 + Math.sin(t*4)*0.15 : 0.25;
+        }
+        // garage door panel tilts open a few degrees when the sensor is open
+        if (f.type === "garage_door") {
+          const targetRot = isOpen ? -0.38 : 0;
+          f.mesh.rotation.x += (targetRot - f.mesh.rotation.x) * 0.08;
+          if (f.mesh.userData.railEdge) f.mesh.userData.railEdge.rotation.copy(f.mesh.rotation);
+        }
       });
 
       renderer.render(scene, cam);
@@ -511,9 +558,58 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
 // sensor_placements. Ground-floor placements only (floor 0); the plan
 // is the first floor.
 // ------------------------------------------------------------------
-function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt }) {
+function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt, plan }) {
   const svgRef = useRef();
   const dragging = useRef(null);
+
+  // architectural feature overlays drawn in plan px (same space as the SVG
+  // backdrop). Doors/garage door take their color from the bound sensor.
+  const featureShapes = (plan?.features ?? []).map((f) => {
+    const horiz = f.w >= f.h;
+    const cx = f.x + f.w / 2, cy = f.y + f.h / 2;
+    const live = f.entity ? liveState[f.entity] : null;
+    const isOpen = live?.state === "open" || live?.state === "triggered";
+    const stateCol = f.entity ? (!live ? C.offline : isOpen ? C.open : C.secure) : null;
+    if (f.type === "window") {
+      return (
+        <g key={f.id}>
+          {horiz
+            ? [cy - 4, cy, cy + 4].map((yy, i) => <line key={i} x1={f.x} y1={yy} x2={f.x + f.w} y2={yy} stroke="#5b9bd5" strokeWidth={i === 1 ? 2.5 : 1.4}/>)
+            : [cx - 4, cx, cx + 4].map((xx, i) => <line key={i} x1={xx} y1={f.y} x2={xx} y2={f.y + f.h} stroke="#5b9bd5" strokeWidth={i === 1 ? 2.5 : 1.4}/>)}
+        </g>
+      );
+    }
+    if (f.type === "garage_door") {
+      const col = stateCol ?? C.open;
+      const seg = (horiz ? f.w : f.h) / 5;
+      return (
+        <g key={f.id}>
+          {[0,1,2,3,4].map(i => horiz
+            ? <line key={i} x1={f.x + i*seg + 2} y1={cy} x2={f.x + (i+1)*seg - 2} y2={cy} stroke={col} strokeWidth={7} strokeLinecap="round"/>
+            : <line key={i} x1={cx} y1={f.y + i*seg + 2} x2={cx} y2={f.y + (i+1)*seg - 2} stroke={col} strokeWidth={7} strokeLinecap="round"/>)}
+          {isOpen && <circle cx={cx} cy={cy} r={26} fill={col} opacity={0.18}>
+            <animate attributeName="r" values="20;30;20" dur="1.4s" repeatCount="indefinite"/>
+          </circle>}
+        </g>
+      );
+    }
+    // hinged door: leaf + quarter-circle swing arc
+    const col = stateCol ?? C.secure;
+    const span = horiz ? f.w : f.h;
+    const swingIn = (f.swing ?? "in") === "in";
+    const hx0 = horiz ? f.x : cx, hy0 = horiz ? cy : f.y; // hinge corner
+    const arcEndX = horiz ? hx0 : hx0 + (swingIn ? -span : span);
+    const arcEndY = horiz ? hy0 + (swingIn ? -span : span) : hy0;
+    return (
+      <g key={f.id}>
+        <path d={`M ${horiz ? hx0 + span : hx0} ${horiz ? hy0 : hy0 + span} A ${span} ${span} 0 0 ${swingIn === horiz ? 0 : 1} ${arcEndX} ${arcEndY}`}
+              fill="none" stroke={col} strokeWidth={1.2} strokeDasharray="4 4" opacity={0.6}/>
+        {horiz
+          ? <line x1={f.x} y1={cy} x2={f.x + f.w} y2={cy} stroke={col} strokeWidth={6} strokeLinecap="round"/>
+          : <line x1={cx} y1={f.y} x2={cx} y2={f.y + f.h} stroke={col} strokeWidth={6} strokeLinecap="round"/>}
+      </g>
+    );
+  });
 
   const toPlanPoint = (e) => {
     const svg = svgRef.current;
@@ -569,6 +665,9 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
         {/* floor plan backdrop */}
         <image href={PLAN_URL} x="0" y="0" width={PLAN_W} height={PLAN_H} />
 
+        {/* architectural features: windows, doors, garage door */}
+        {featureShapes}
+
         {pendingPlace && (
           <text x={PLAN_W/2} y={28} fill={C.accent} fontSize="20" textAnchor="middle" fontWeight="700"
                 style={{ paintOrder:"stroke", stroke:"#000", strokeWidth:4 }}>
@@ -582,17 +681,23 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
           const col = colorFor(s.type, live, armed);
           const alert = col === C.open;
           const isSel = selected === s.entity_id;
+          const lit = s.type === "light" && live?.state === "lit";
           return (
             <g key={s.entity_id}
                style={{ cursor: edit ? "grab" : "pointer" }}
                onPointerDown={(e)=>onDown(e, s.entity_id)}>
+              {lit && (
+                <circle cx={px} cy={py} r={34} fill={col} opacity={0.16}>
+                  <animate attributeName="opacity" values="0.12;0.2;0.12" dur="2.6s" repeatCount="indefinite"/>
+                </circle>
+              )}
               {(alert || isSel) && (
                 <circle cx={px} cy={py} r={22} fill={col} opacity={alert ? 0.28 : 0.15}>
                   {alert && <animate attributeName="r" values="18;26;18" dur="1.4s" repeatCount="indefinite"/>}
                 </circle>
               )}
               <circle cx={px} cy={py} r={12} fill={col} opacity={0.25}/>
-              <circle cx={px} cy={py} r={7} fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 2 : 0}/>
+              <circle cx={px} cy={py} r={s.type === "light" ? 6 : 7} fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 2 : 0}/>
               {(edit || isSel) && (
                 <text x={px} y={py - 16} fill={C.text} fontSize="14" textAnchor="middle"
                       style={{ paintOrder:"stroke", stroke:"#000", strokeWidth:3, pointerEvents:"none" }}>
@@ -766,13 +871,16 @@ export default function SecurityBoard() {
     persistBoard({ ...boardStateRef.current, view });
   }, [persistBoard]);
 
-  // security-relevant HA entities that could go on the board
+  // HA entities that can go on the board: security sensors + lights.
+  // Lights (switch/light domains) become draggable glow markers — Eric
+  // places them where the fixtures actually are.
   const isSecuritySensor = (e) => {
     if (e.domain === "binary_sensor") {
       const dc = String(e.attributes?.device_class ?? "");
-      return ["door","window","motion","occupancy","moisture","smoke","gas","carbon_monoxide","vibration","tamper"].includes(dc) || dc === "";
+      return ["door","window","garage_door","motion","occupancy","moisture","smoke","gas","carbon_monoxide","vibration","tamper"].includes(dc) || dc === "";
     }
     if (e.domain === "lock") return true;
+    if (e.domain === "switch" || e.domain === "light") return true;
     return false;
   };
 
@@ -835,8 +943,12 @@ export default function SecurityBoard() {
   const liveState = useMemo(() => {
     const s = {};
     sensors.forEach(x => { s[x.entity_id] = liveFor(x.type, entities.get(x.entity_id)); });
+    // plan features (doors/garage door) bind to contact sensors by entity id
+    (plan?.features ?? []).forEach(f => {
+      if (f.entity && !s[f.entity]) s[f.entity] = liveFor("contact", entities.get(f.entity));
+    });
     return s;
-  }, [sensors, entities]);
+  }, [sensors, entities, plan]);
 
   const alarm = entities.get("alarm_control_panel.homehub");
   const alarmState = alarm ? alarm.state : "unknown"; // disarmed|arming|armed_away|armed_home|pending|triggered
@@ -888,6 +1000,7 @@ export default function SecurityBoard() {
   const summary = useMemo(() => {
     let open=0, motion=0, low=0, off=0;
     sensors.forEach(s=>{
+      if (s.type === "light") return; // lights aren't perimeter state
       const l = liveState[s.entity_id];
       if (!l) { off++; return; }
       if (l.state==="open"||l.state==="triggered") open++;
@@ -1012,7 +1125,7 @@ export default function SecurityBoard() {
     </div>
   ) : viewMode === "plan" ? (
     <FloorPlan2D
-      sensors={sensors} liveState={liveState} armed={armed}
+      sensors={sensors} liveState={liveState} armed={armed} plan={plan}
       selected={selected} edit={edit} onPick={setSelected} onMoved={onMoved}
       pendingPlace={pendingPlace}
       onPlaceAt={(sensor, x, y) => { placeSensor(sensor.entity_id, x, y, 0); setPendingPlace(null); }}
@@ -1036,15 +1149,19 @@ export default function SecurityBoard() {
       padding:12, backdropFilter:"blur(8px)", zIndex:5,
     }}>
       <div style={{fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:C.sub, marginBottom:8}}>
-        Unplaced sensors {unplaced.length ? `(${unplaced.length})` : ""}
+        Unplaced {unplaced.length ? `(${unplaced.length})` : ""}
       </div>
       {unplaced.length === 0 && (
         <div style={{fontSize:12, color:C.sub, lineHeight:1.5}}>
           All paired sensors are placed. Pair a sensor in Home Assistant and it appears here.
         </div>
       )}
-      {unplaced.map(s => {
-        const c = { contact:C.secure, motion:C.motion, leak:C.accent, smoke:C.open }[s.type] || C.sub;
+      {[["Sensors", unplaced.filter(s => s.type !== "light")],
+        ["Lights & switches", unplaced.filter(s => s.type === "light")]].map(([sect, list]) => list.length > 0 && (
+        <div key={sect}>
+          <div style={{fontSize:10, color:C.sub, letterSpacing:0.8, textTransform:"uppercase", margin:"6px 0 5px"}}>{sect}</div>
+          {list.map(s => {
+        const c = { contact:C.secure, motion:C.motion, leak:C.accent, smoke:C.open, light:C.motion }[s.type] || C.sub;
         const armedForPlace = pendingPlace?.entity_id === s.entity_id;
         return (
           <button key={s.entity_id}
@@ -1060,7 +1177,9 @@ export default function SecurityBoard() {
             <span style={{overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{s.label}</span>
           </button>
         );
-      })}
+          })}
+        </div>
+      ))}
       {pendingPlace && (
         <div style={{fontSize:11, color:C.accent, marginTop:4}}>Tap the plan to place, or tap again to cancel.</div>
       )}
@@ -1075,7 +1194,6 @@ export default function SecurityBoard() {
         <div style={{flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch"}}>
           <div style={{position:"relative", height:"46vh", minHeight:280}}>
             {scene}
-          {tray}
             {tray}
             <div style={{position:"absolute", left:12, top:12}}>{viewToggle}</div>
             <div style={{position:"absolute", left:12, bottom:12}}>{floorToggle}</div>

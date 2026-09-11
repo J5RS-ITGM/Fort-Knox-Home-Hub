@@ -60,6 +60,20 @@ SEED: list[dict[str, Any]] = [
     {"entity_id": "binary_sensor.front_door_lock_current_status_of_the_door", "state": "off",
      "attributes": {"friendly_name": "Front Door Lock Current status of the door", "device_class": "door",
                     "model": "Schlage BE469ZP"}},
+    # Garage — Zooz ZEN16 multi-relay (3 channels: R1 drives the opener) +
+    # tilt/contact sensor for door state + ZEN71 for garage lights. Mirrors
+    # the real install so the panel's relay picker and garage tile are
+    # testable in mock mode.
+    {"entity_id": "switch.garage_door_relay", "state": "off",
+     "attributes": {"friendly_name": "Garage Door Relay R1", "model": "Zooz ZEN16"}},
+    {"entity_id": "switch.garage_relay_r2", "state": "off",
+     "attributes": {"friendly_name": "Garage Relay R2", "model": "Zooz ZEN16"}},
+    {"entity_id": "switch.garage_relay_r3", "state": "off",
+     "attributes": {"friendly_name": "Garage Relay R3", "model": "Zooz ZEN16"}},
+    {"entity_id": "binary_sensor.garage_door", "state": "off",
+     "attributes": {"friendly_name": "Garage Door", "device_class": "garage_door", "battery": 96}},
+    {"entity_id": "switch.garage_lights", "state": "off",
+     "attributes": {"friendly_name": "Garage Lights", "model": "Zooz ZEN71"}},
     # Pool pump — Zooz ZEN15 (power metering)
     {"entity_id": "switch.pool_pump", "state": "on",
      "attributes": {"friendly_name": "Pool Pump", "model": "Zooz ZEN15", "power_w": 1180}},

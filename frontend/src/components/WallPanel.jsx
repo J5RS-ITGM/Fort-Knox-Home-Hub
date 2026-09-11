@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import {
   Lock, Unlock, Sun, Cloud, Droplets, CheckSquare, Lightbulb, Zap, Wifi,
-  Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause,
+  Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause, Warehouse,
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
 import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState } from "@/lib/planScene";
@@ -395,16 +395,17 @@ const GRID_COLS = 12;
 const DEFAULT_LAYOUT = {
   clock:   { x:0, y:0, w:12, h:1, visible:true, m:0 },
   lock:    { x:4, y:5, w:2, h:2, visible:true, m:1 },
-  board:   { x:0, y:1, w:6, h:4, visible:true, m:2 },
-  weather: { x:6, y:1, w:3, h:2, visible:true, m:3 },
-  radar:   { x:9, y:1, w:3, h:2, visible:true, m:4 },
-  climate: { x:6, y:3, w:3, h:2, visible:true, m:5 },
-  calendar:{ x:9, y:3, w:3, h:2, visible:true, m:6 },
-  devices: { x:0, y:5, w:4, h:2, visible:true, m:7 },
-  tasks:   { x:6, y:5, w:6, h:2, visible:true, m:8 },
+  garage:  { x:6, y:5, w:2, h:2, visible:true, m:2 },
+  board:   { x:0, y:1, w:6, h:4, visible:true, m:3 },
+  weather: { x:6, y:1, w:3, h:2, visible:true, m:4 },
+  radar:   { x:9, y:1, w:3, h:2, visible:true, m:5 },
+  climate: { x:6, y:3, w:3, h:2, visible:true, m:6 },
+  calendar:{ x:9, y:3, w:3, h:2, visible:true, m:7 },
+  devices: { x:0, y:5, w:4, h:2, visible:true, m:8 },
+  tasks:   { x:8, y:5, w:4, h:2, visible:true, m:9 },
 };
 const TILE_META = {
-  clock:{label:"Clock"}, lock:{label:"Locks"}, board:{label:"Home Map"}, weather:{label:"Weather"}, radar:{label:"Radar"},
+  clock:{label:"Clock"}, lock:{label:"Locks"}, garage:{label:"Garage"}, board:{label:"Home Map"}, weather:{label:"Weather"}, radar:{label:"Radar"},
   climate:{label:"Climate"}, calendar:{label:"Today"}, devices:{label:"Devices"}, tasks:{label:"Tasks"},
 };
 const LS_KEY = "homehub.wallpanel.layout.v2";
@@ -552,6 +553,7 @@ export default function WallPanel() {
   // Mobile "Arrange" mode: shows up/down controls on each stacked card.
   // (Touch drag in a scrolling stack is unreliable; arrows always work.)
   const [arrange, setArrange] = useState(false);
+  const [devicePick, setDevicePick] = useState(false); // mobile Devices tile show/hide mode
   const mobileIds = (l) => Object.keys(l).filter(id => l[id].visible)
     .sort((a,b) => (l[a].m ?? 99) - (l[b].m ?? 99) || (l[a].y - l[b].y) || (l[a].x - l[b].x));
   const moveMobile = (id, dir) => setLayout(prev => {
@@ -610,6 +612,48 @@ export default function WallPanel() {
     }, 800);
     return () => clearTimeout(t);
   }, [layout]);
+
+  // Garage tile config rides inside the garage layout entry (extra keys are
+  // preserved by the layout save): relay = the ZEN16 channel that pulses the
+  // opener, sensor = the door contact/tilt sensor. Defaults resolve by name
+  // so a fresh install works in mock mode.
+  const garageCfg = useMemo(() => {
+    const g = layout.garage ?? {};
+    const bySuffix = (dom, frag) => {
+      for (const e of entities.values())
+        if (e.domain === dom && e.entity_id.includes(frag)) return e.entity_id;
+      return "";
+    };
+    return {
+      relay: g.relay ?? bySuffix("switch", "garage_door_relay"),
+      sensor: g.sensor ?? bySuffix("binary_sensor", "garage_door"),
+    };
+  }, [layout.garage, entities]);
+  const setGarageCfg = (patch) => setLayout(prev => ({ ...prev, garage: { ...prev.garage, ...patch } }));
+
+  const garageDoor = useMemo(() => {
+    const sensor = garageCfg.sensor ? entities.get(garageCfg.sensor) : null;
+    const relay = garageCfg.relay ? entities.get(garageCfg.relay) : null;
+    const state = !sensor || sensor.state === "unavailable" ? null : sensor.state === "on" ? "open" : "closed";
+    return { state, relayOk: !!relay, relayBusy: relay?.state === "on" };
+  }, [entities, garageCfg]);
+  const [garagePulsing, setGaragePulsing] = useState(false);
+  const triggerGarage = async () => {
+    if (!garageCfg.relay || garagePulsing) return;
+    setGaragePulsing(true);
+    try { await callService("switch", "turn_on", garageCfg.relay); } catch (e) { console.error(e); }
+    setTimeout(() => setGaragePulsing(false), 2500); // opener cycle debounce
+  };
+
+  // Devices tile hidden list (e.g. spare ZEN16 relay channels): stored on
+  // the devices layout entry; toggled in edit/arrange mode.
+  const hiddenDevices = layout.devices?.hidden ?? [];
+  const toggleDeviceHidden = (id) => setLayout(prev => {
+    const cur = prev.devices?.hidden ?? [];
+    const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
+    return { ...prev, devices: { ...prev.devices, hidden: next } };
+  });
+
 
   const liveStateRef = useRef(liveState); const armedRef = useRef(armed);
   useEffect(()=>{ liveStateRef.current = liveState; },[liveState]);
@@ -797,6 +841,50 @@ export default function WallPanel() {
         </div>
       </Tile>
     ),
+    garage: (
+      <Tile title="Garage" edit={edit} onToggleVisible={()=>setVisible("garage",false)}>
+        {edit ? (
+          <div style={{display:"flex", flexDirection:"column", gap:8, fontSize:11, color:C.sub}}>
+            <label>Opener relay
+              <select value={garageCfg.relay} onChange={(e)=>setGarageCfg({relay:e.target.value})}
+                style={{width:"100%", marginTop:3, background:C.cardHi, color:C.text, border:`1px solid ${C.edge}`, borderRadius:8, padding:"7px 8px", fontSize:12}}>
+                <option value="">— none —</option>
+                {[...entities.values()].filter(e=>e.domain==="switch").map(e=>
+                  <option key={e.entity_id} value={e.entity_id}>{e.friendly_name}</option>)}
+              </select>
+            </label>
+            <label>Door sensor
+              <select value={garageCfg.sensor} onChange={(e)=>setGarageCfg({sensor:e.target.value})}
+                style={{width:"100%", marginTop:3, background:C.cardHi, color:C.text, border:`1px solid ${C.edge}`, borderRadius:8, padding:"7px 8px", fontSize:12}}>
+                <option value="">— none —</option>
+                {[...entities.values()].filter(e=>e.domain==="binary_sensor").map(e=>
+                  <option key={e.entity_id} value={e.entity_id}>{e.friendly_name}</option>)}
+              </select>
+            </label>
+          </div>
+        ) : (
+          <div style={{display:"flex", alignItems:"center", gap:12, height:"100%"}}>
+            <Warehouse size={26} color={garageDoor.state === "open" ? C.open : garageDoor.state === "closed" ? C.secure : C.subDim}/>
+            <div style={{minWidth:0, flex:1}}>
+              <div style={{fontSize:14, fontWeight:700}}>Garage Door</div>
+              <div style={{fontSize:11, color: garageDoor.state === "open" ? C.open : C.sub, marginTop:2}}>
+                {garageDoor.state === "open" ? "Open" : garageDoor.state === "closed" ? "Closed" : "No sensor"}
+                {garagePulsing && " · Moving…"}
+              </div>
+            </div>
+            <button onClick={()=>triggerGarage()} disabled={!garageCfg.relay || garagePulsing}
+              style={{ flexShrink:0, minWidth:96, padding:"12px 16px", borderRadius:12, fontSize:14, fontWeight:800,
+                cursor: !garageCfg.relay || garagePulsing ? "default" : "pointer",
+                opacity: !garageCfg.relay ? 0.45 : garagePulsing ? 0.6 : 1,
+                background: garageDoor.state === "open" ? C.accent : C.cardHi,
+                color: garageDoor.state === "open" ? "#0c0e13" : C.text,
+                border: `1px solid ${garageDoor.state === "open" ? C.accent : C.edge}` }}>
+              {!garageCfg.relay ? "No relay" : garageDoor.state === "open" ? "Close" : garageDoor.state === "closed" ? "Open" : "Trigger"}
+            </button>
+          </div>
+        )}
+      </Tile>
+    ),
     lock: (
       <Tile title="Locks" edit={edit} onToggleVisible={()=>setVisible("lock",false)}>
         <div style={{display:"flex", flexDirection:"column", gap:10, justifyContent:"center", height:"100%"}}>
@@ -835,15 +923,33 @@ export default function WallPanel() {
     ),
     devices: (
       <Tile title="Devices" edit={edit} onToggleVisible={()=>setVisible("devices",false)}>
+        {isMobile && (
+          <button onClick={()=>setDevicePick(p=>!p)}
+            style={{ display:"inline-flex", alignItems:"center", gap:5, marginBottom:8, background: devicePick?C.accent:C.cardHi,
+              color: devicePick?"#0c0e13":C.sub, border:`1px solid ${devicePick?C.accent:C.edge}`, borderRadius:8,
+              padding:"5px 9px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+            <Eye size={12}/>{devicePick ? "Done" : "Show / hide"}
+          </button>
+        )}
         <div style={{display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: isMobile ? 9 : 7, marginBottom:8}}>
-          {devices.map((d)=>(
-            <button key={d.entity_id} onClick={()=>!edit && toggleDevice(d)} style={{ display:"flex", alignItems:"center", gap:7, background: d.on&&d.kind!=="monitor"?"rgba(107,138,253,0.15)":C.cardHi, border:`1px solid ${d.on&&d.kind!=="monitor"?C.accent:C.edge}`, borderRadius:10, padding: isMobile ? "12px 11px" : "8px 9px", cursor: d.kind==="monitor"||edit?"default":"pointer", color:C.text, textAlign:"left" }}>
-              {d.kind==="light" && <Lightbulb size={isMobile?17:15} color={d.on?C.motion:C.subDim}/>}
-              {d.kind==="switch" && <Zap size={isMobile?17:15} color={d.on?C.secure:C.subDim}/>}
-              {d.kind==="monitor" && <Wifi size={isMobile?17:15} color={C.secure}/>}
-              <span style={{fontSize: isMobile?12:11, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
+          {devices.filter(d => (edit || devicePick) || !hiddenDevices.includes(d.entity_id)).map((d)=>{
+            const hidden = hiddenDevices.includes(d.entity_id);
+            const picking = edit || devicePick; // edit (desktop) / Show-hide chip (mobile)
+            return (
+            <button key={d.entity_id}
+              onClick={()=> picking ? toggleDeviceHidden(d.entity_id) : toggleDevice(d)}
+              style={{ display:"flex", alignItems:"center", gap:7, minWidth:0, opacity: hidden ? 0.35 : 1,
+                background: d.on&&d.kind!=="monitor"&&!hidden?"rgba(107,138,253,0.15)":C.cardHi,
+                border:`1px solid ${picking && hidden ? C.open : d.on&&d.kind!=="monitor"?C.accent:C.edge}`,
+                borderRadius:10, padding: isMobile ? "12px 11px" : "8px 9px",
+                cursor: (d.kind==="monitor" && !picking)?"default":"pointer", color:C.text, textAlign:"left" }}>
+              {picking && (hidden ? <EyeOff size={isMobile?15:13} color={C.open} style={{flexShrink:0}}/> : <Eye size={isMobile?15:13} color={C.subDim} style={{flexShrink:0}}/>)}
+              {d.kind==="light" && <Lightbulb size={isMobile?17:15} color={d.on?C.motion:C.subDim} style={{flexShrink:0}}/>}
+              {d.kind==="switch" && <Zap size={isMobile?17:15} color={d.on?C.secure:C.subDim} style={{flexShrink:0}}/>}
+              {d.kind==="monitor" && <Wifi size={isMobile?17:15} color={C.secure} style={{flexShrink:0}}/>}
+              <span style={{fontSize: isMobile?12:11, fontWeight:600, minWidth:0, flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
             </button>
-          ))}
+          );})}
         </div>
         <div style={{display:"flex", gap:6}}>
           {SCENES.map(([n,Ic])=>(
