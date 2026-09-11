@@ -118,7 +118,7 @@ async def ui_settings(session: AsyncSession = Depends(get_session)) -> dict:
 # room/floor/coords — the pairing tracker) and "All entities" (raw dump for
 # YAML/automation work, exact entity_ids included). Built in-memory with
 # openpyxl; nothing is written to disk.
-SENSOR_DOMAINS = {"binary_sensor", "lock", "siren", "climate", "valve"}
+SENSOR_DOMAINS = {"binary_sensor", "lock", "siren", "climate", "valve", "switch", "light"}
 
 
 @protected.get("/export/sensors.xlsx")

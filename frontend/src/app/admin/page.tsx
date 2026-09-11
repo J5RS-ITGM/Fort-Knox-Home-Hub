@@ -215,7 +215,13 @@ function FamilyTab({ family, users, busy, act }: { family: Family[]; users: User
 // ---------------------------------------------------------------- Devices
 function DevicesTab({ placements, entities, busy, act }: { placements: Placement[]; entities: Entity[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
   const placed = new Set(placements.map((p) => p.entity_id));
-  const unplaced = entities.filter((e) => e.domain === "binary_sensor" && !placed.has(e.entity_id));
+  // Placeable on the board: security sensors, locks, and lights/switches
+  // (lights render as glow markers). Grouped in the dropdown below.
+  const placeable = entities.filter(
+    (e) => (e.domain === "binary_sensor" || e.domain === "lock" || e.domain === "switch" || e.domain === "light") && !placed.has(e.entity_id)
+  );
+  const unplaced = placeable.filter((e) => e.domain === "binary_sensor" || e.domain === "lock");
+  const unplacedLights = placeable.filter((e) => e.domain === "switch" || e.domain === "light");
   const [sel, setSel] = useState("");
   const save = (p: Placement, body: Partial<Placement>) =>
     act(() => api(`/api/placements/${p.entity_id}`, { method: "PUT", body: JSON.stringify({ ...p, ...body }) }));
@@ -269,8 +275,13 @@ function DevicesTab({ placements, entities, busy, act }: { placements: Placement
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <select className={input} value={sel} onChange={(e) => setSel(e.target.value)}>
-          <option value="">Add unplaced sensor…</option>
-          {unplaced.map((e) => <option key={e.entity_id} value={e.entity_id}>{e.friendly_name} ({e.entity_id})</option>)}
+          <option value="">Add unplaced sensor or light…</option>
+          <optgroup label="Sensors & locks">
+            {unplaced.map((e) => <option key={e.entity_id} value={e.entity_id}>{e.friendly_name} ({e.entity_id})</option>)}
+          </optgroup>
+          <optgroup label="Lights & switches">
+            {unplacedLights.map((e) => <option key={e.entity_id} value={e.entity_id}>{e.friendly_name} ({e.entity_id})</option>)}
+          </optgroup>
         </select>
         <button disabled={busy || !sel} className={primary}
           onClick={() => act(() => api(`/api/placements/${sel}`, { method: "PUT", body: JSON.stringify({ entity_id: sel, room: "", floor: 0, x: 0, y: 0 }) })).then((ok) => ok && setSel(""))}>
