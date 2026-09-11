@@ -1,0 +1,20 @@
+# HomeHub block for a shared Caddy box (automatic TLS). Merge into your
+# Caddyfile alongside the other apps' site blocks, then: caddy reload
+hub.example.com {
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Strict-Transport-Security "max-age=31536000"
+    }
+
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8100
+    }
+    handle /ws {
+        reverse_proxy 127.0.0.1:8100   # websockets proxied automatically
+    }
+    handle {
+        reverse_proxy 127.0.0.1:3100
+    }
+}
