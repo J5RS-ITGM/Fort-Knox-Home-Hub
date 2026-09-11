@@ -593,6 +593,21 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
         </g>
       );
     }
+    if (f.type === "slider") {
+      const col = stateCol ?? C.secure;
+      const half = (horiz ? f.w : f.h) / 2;
+      return (
+        <g key={f.id}>
+          {horiz ? (<>
+            <line x1={f.x} y1={cy - 3} x2={f.x + half} y2={cy - 3} stroke={col} strokeWidth={5} strokeLinecap="round"/>
+            <line x1={f.x + half} y1={cy + 3} x2={f.x + f.w} y2={cy + 3} stroke={col} strokeWidth={5} strokeLinecap="round"/>
+          </>) : (<>
+            <line x1={cx - 3} y1={f.y} x2={cx - 3} y2={f.y + half} stroke={col} strokeWidth={5} strokeLinecap="round"/>
+            <line x1={cx + 3} y1={f.y + half} x2={cx + 3} y2={f.y + f.h} stroke={col} strokeWidth={5} strokeLinecap="round"/>
+          </>)}
+        </g>
+      );
+    }
     // hinged door: leaf + quarter-circle swing arc
     const col = stateCol ?? C.secure;
     const span = horiz ? f.w : f.h;
@@ -747,6 +762,8 @@ export default function SecurityBoard() {
   const [selected, setSelected] = useState(null);
   const [edit, setEdit] = useState(false);
   const [pendingPlace, setPendingPlace] = useState(null); // {entity_id,label,type} awaiting a tap on the plan
+  const [trayFilter, setTrayFilter] = useState("");
+  const [trayOpen, setTrayOpen] = useState({ sensors: true, lights: true });
   const [saveNote, setSaveNote] = useState("");
   const narrow = useIsNarrow();
 
@@ -923,6 +940,30 @@ export default function SecurityBoard() {
     setSelected(null);
   }, []);
 
+  // Resolve feature -> entity bindings. Explicit entity wins when HA knows
+  // it; otherwise bind to the nearest placed contact-type sensor pin within
+  // 70 plan px of the feature. Eric places pins AT the doors, so dragging a
+  // door sensor pin onto a door wires that door up — zero config.
+  const resolvedPlan = useMemo(() => {
+    if (!plan) return plan;
+    const contacts = (placements ?? [])
+      .filter(p => p.floor === 0)
+      .map(p => ({ p, e: entities.get(p.entity_id) }))
+      .filter(({ e }) => e && typeFor(e) === "contact");
+    const features = (plan.features ?? []).map(f => {
+      if (f.entity && entities.has(f.entity)) return f;
+      const fx = f.x + f.w / 2, fy = f.y + f.h / 2;
+      let best = null, bestD = 70;
+      contacts.forEach(({ p }) => {
+        const { px, py } = planFromGrid(p.x, p.y);
+        const d = Math.hypot(px - fx, py - fy);
+        if (d < bestD) { best = p.entity_id; bestD = d; }
+      });
+      return best ? { ...f, entity: best } : { ...f, entity: "" };
+    });
+    return { ...plan, features };
+  }, [plan, placements, entities]);
+
   // join placements with live entities: board model
   const sensors = useMemo(() => {
     if (!placements) return [];
@@ -944,11 +985,11 @@ export default function SecurityBoard() {
     const s = {};
     sensors.forEach(x => { s[x.entity_id] = liveFor(x.type, entities.get(x.entity_id)); });
     // plan features (doors/garage door) bind to contact sensors by entity id
-    (plan?.features ?? []).forEach(f => {
+    (resolvedPlan?.features ?? []).forEach(f => {
       if (f.entity && !s[f.entity]) s[f.entity] = liveFor("contact", entities.get(f.entity));
     });
     return s;
-  }, [sensors, entities, plan]);
+  }, [sensors, entities, resolvedPlan]);
 
   const alarm = entities.get("alarm_control_panel.homehub");
   const alarmState = alarm ? alarm.state : "unknown"; // disarmed|arming|armed_away|armed_home|pending|triggered
@@ -1125,14 +1166,14 @@ export default function SecurityBoard() {
     </div>
   ) : viewMode === "plan" ? (
     <FloorPlan2D
-      sensors={sensors} liveState={liveState} armed={armed} plan={plan}
+      sensors={sensors} liveState={liveState} armed={armed} plan={resolvedPlan}
       selected={selected} edit={edit} onPick={setSelected} onMoved={onMoved}
       pendingPlace={pendingPlace}
       onPlaceAt={(sensor, x, y) => { placeSensor(sensor.entity_id, x, y, 0); setPendingPlace(null); }}
     />
   ) : (
     <ThreeScene
-      sensors={sensors} plan={plan} plan2={plan2} labels={labels} view={boardState.view}
+      sensors={sensors} plan={resolvedPlan} plan2={plan2} labels={labels} view={boardState.view}
       liveStateRef={liveStateRef} armedRef={armedRef} selectedRef={selectedRef} editRef={editRef}
       floorView={floorView} onPick={setSelected} onMoved={onMoved}
       onLabelMoved={onLabelMoved} onLabelRename={onLabelRename} onView={onView} narrow={narrow}
@@ -1144,23 +1185,37 @@ export default function SecurityBoard() {
   // Tap one to arm it, then tap the plan to drop it. Works on touch.
   const tray = edit && viewMode === "plan" ? (
     <div style={{
-      position:"absolute", right:12, top:12, width:210, maxHeight:"70%", overflowY:"auto",
+      position:"absolute", right:12, top:12, width:236, maxHeight:"70%", overflowY:"auto",
       background:"rgba(15,17,22,0.92)", border:`1px solid ${C.floorEdge}`, borderRadius:12,
       padding:12, backdropFilter:"blur(8px)", zIndex:5,
     }}>
       <div style={{fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:C.sub, marginBottom:8}}>
         Unplaced {unplaced.length ? `(${unplaced.length})` : ""}
       </div>
+      <input value={trayFilter} onChange={(e)=>setTrayFilter(e.target.value)} placeholder="Filter…"
+        style={{width:"100%", boxSizing:"border-box", marginBottom:8, background:"rgba(255,255,255,0.05)",
+          color:C.text, border:`1px solid ${C.floorEdge}`, borderRadius:8, padding:"7px 9px", fontSize:12, outline:"none"}}/>
       {unplaced.length === 0 && (
         <div style={{fontSize:12, color:C.sub, lineHeight:1.5}}>
           All paired sensors are placed. Pair a sensor in Home Assistant and it appears here.
         </div>
       )}
-      {[["Sensors", unplaced.filter(s => s.type !== "light")],
-        ["Lights & switches", unplaced.filter(s => s.type === "light")]].map(([sect, list]) => list.length > 0 && (
-        <div key={sect}>
-          <div style={{fontSize:10, color:C.sub, letterSpacing:0.8, textTransform:"uppercase", margin:"6px 0 5px"}}>{sect}</div>
-          {list.map(s => {
+      {[["sensors","Sensors", unplaced.filter(s => s.type !== "light")],
+        ["lights","Lights & switches", unplaced.filter(s => s.type === "light")]].map(([key, sect, all]) => {
+        const q = trayFilter.trim().toLowerCase();
+        const list = q ? all.filter(s => s.label.toLowerCase().includes(q) || s.entity_id.includes(q)) : all;
+        if (all.length === 0) return null;
+        const open = q ? list.length > 0 : trayOpen[key]; // a filter match forces the section open
+        return (
+        <div key={key}>
+          <button onClick={()=>setTrayOpen(o=>({...o, [key]: !o[key]}))}
+            style={{display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%",
+              background:"transparent", border:"none", cursor:"pointer", padding:"6px 2px 5px",
+              fontSize:10, color:C.text, letterSpacing:0.8, textTransform:"uppercase", fontWeight:700}}>
+            <span>{sect} ({q ? `${list.length}/${all.length}` : all.length})</span>
+            <span style={{color:C.sub}}>{open ? "▾" : "▸"}</span>
+          </button>
+          {open && list.map(s => {
         const c = { contact:C.secure, motion:C.motion, leak:C.accent, smoke:C.open, light:C.motion }[s.type] || C.sub;
         const armedForPlace = pendingPlace?.entity_id === s.entity_id;
         return (
@@ -1179,7 +1234,7 @@ export default function SecurityBoard() {
         );
           })}
         </div>
-      ))}
+      );})}
       {pendingPlace && (
         <div style={{fontSize:11, color:C.accent, marginTop:4}}>Tap the plan to place, or tap again to cancel.</div>
       )}

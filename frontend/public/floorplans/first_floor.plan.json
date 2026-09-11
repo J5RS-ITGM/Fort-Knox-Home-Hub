@@ -287,9 +287,9 @@
    "id": "garage_side_door",
    "type": "door",
    "x": 955.8,
-   "y": 765.0,
+   "y": 618.0,
    "w": 4.2,
-   "h": 45.0,
+   "h": 47.0,
    "entity": "binary_sensor.garage_entry_contact",
    "swing": "in"
   },
@@ -316,6 +316,25 @@
    "y": 771.4,
    "w": 60.0,
    "h": 4.2
+  },
+  {
+   "id": "kitchen_slider",
+   "type": "slider",
+   "x": 435.0,
+   "y": 206.7,
+   "w": 60.0,
+   "h": 4.2,
+   "entity": "binary_sensor.back_door_contact"
+  },
+  {
+   "id": "three_season_door",
+   "type": "door",
+   "x": 715.0,
+   "y": 206.7,
+   "w": 50.0,
+   "h": 4.2,
+   "entity": "",
+   "swing": "in"
   }
  ]
 }

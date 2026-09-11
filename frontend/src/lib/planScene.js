@@ -206,6 +206,20 @@ export function buildPlanFloor(plan, y, floorIndex = 0) {
       panel.userData.railEdge = rail;
       g.add(rail);
       featureMeshes.push({ id: f.id, type: f.type, entity: f.entity ?? "", mesh: panel });
+    } else if (f.type === "slider") {
+      // sliding door: two half-span panels, one nudged to the interior track
+      const half = span / 2;
+      [[-0.25, -0.06], [0.25, 0.06]].forEach(([along, off]) => {
+        const panel = new THREE.Mesh(
+          new THREE.BoxGeometry(horiz ? half : 0.06, WALL_H * 0.75, horiz ? 0.06 : half),
+          new THREE.MeshStandardMaterial({ color: FEAT_C.door, transparent: true, opacity: 0.75,
+            emissive: FEAT_C.door, emissiveIntensity: 0.25, roughness: 0.4 })
+        );
+        if (horiz) panel.position.set(rr.cx + along * span, y + WALL_H * 0.375, rr.cz + off);
+        else panel.position.set(rr.cx + off, y + WALL_H * 0.375, rr.cz + along * span);
+        g.add(panel);
+        featureMeshes.push({ id: f.id, type: f.type, entity: f.entity ?? "", mesh: panel });
+      });
     } else {
       // hinged door: leaf set into the opening + swing arc etched on the floor
       const leaf = new THREE.Mesh(
