@@ -57,6 +57,47 @@ async def lifespan(app: FastAPI):
                     if cname not in ccols:
                         sync_conn.execute(text(f"ALTER TABLE calendar_events ADD COLUMN {cname} {cdef}"))
                         log.info("Added calendar_events.%s column", cname)
+                # tasks (nee chores): multi-assignee + reminders
+                chcols = {c["name"] for c in inspect(sync_conn).get_columns("chores")}
+                for cname, cdef in [
+                    ("assignee_ids", "TEXT NOT NULL DEFAULT ''"),
+                    ("remind_time", "VARCHAR(5)"),
+                    ("repeat_days", "VARCHAR(30) NOT NULL DEFAULT 'daily'"),
+                ]:
+                    if cname not in chcols:
+                        sync_conn.execute(text(f"ALTER TABLE chores ADD COLUMN {cname} {cdef}"))
+                        log.info("Added chores.%s column", cname)
+                sync_conn.execute(text("UPDATE chores SET assignee_ids = member_id WHERE assignee_ids = ''"))
+                # chore_completions: per-member rows. The old UNIQUE(chore_id, date)
+                # would reject a second kid's completion, so it must be replaced
+                # with UNIQUE(chore_id, date, member_id).
+                cccols = {c["name"] for c in inspect(sync_conn).get_columns("chore_completions")}
+                if "member_id" not in cccols:
+                    if sync_conn.dialect.name == "sqlite":
+                        # SQLite bakes table-level UNIQUE into the DDL: rebuild.
+                        sync_conn.execute(text(
+                            "CREATE TABLE chore_completions_new ("
+                            "id VARCHAR(36) PRIMARY KEY, chore_id VARCHAR(36) NOT NULL, "
+                            "date VARCHAR(10) NOT NULL, member_id VARCHAR(36), "
+                            "done_at DATETIME, "
+                            "CONSTRAINT uq_chore_date_member UNIQUE (chore_id, date, member_id))"
+                        ))
+                        sync_conn.execute(text(
+                            "INSERT INTO chore_completions_new (id, chore_id, date, member_id, done_at) "
+                            "SELECT id, chore_id, date, NULL, done_at FROM chore_completions"
+                        ))
+                        sync_conn.execute(text("DROP TABLE chore_completions"))
+                        sync_conn.execute(text("ALTER TABLE chore_completions_new RENAME TO chore_completions"))
+                    else:
+                        sync_conn.execute(text("ALTER TABLE chore_completions ADD COLUMN member_id VARCHAR(36)"))
+                        sync_conn.execute(text("ALTER TABLE chore_completions DROP CONSTRAINT IF EXISTS uq_chore_date"))
+                        sync_conn.execute(text(
+                            "DO $$ BEGIN "
+                            "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_chore_date_member') THEN "
+                            "ALTER TABLE chore_completions ADD CONSTRAINT uq_chore_date_member UNIQUE (chore_id, date, member_id); "
+                            "END IF; END $$"
+                        ))
+                    log.info("chore_completions migrated to per-member completions")
             await conn.run_sync(_ensure_columns)
         log.info("Database tables ensured (%s)", settings.database_url.split("://")[0])
 

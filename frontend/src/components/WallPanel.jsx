@@ -748,6 +748,72 @@ export default function WallPanel() {
     });
   }, [entities]);
 
+  // ---- Task reminders: popup when due, per-kid Done -----------------------
+  const [famMembers, setFamMembers] = useState([]);
+  const [taskList, setTaskList] = useState([]);
+  const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+  const loadTasks = () => {
+    fetch(`${API_URL}/api/family`, { credentials: "include" }).then(r=>r.ok?r.json():[]).then(setFamMembers).catch(()=>{});
+    fetch(`${API_URL}/api/chores?date=${todayISO()}`, { credentials: "include" }).then(r=>r.ok?r.json():[]).then(setTaskList).catch(()=>{});
+  };
+  useEffect(() => { loadTasks(); const iv = setInterval(loadTasks, 60000); return () => clearInterval(iv); }, []);
+  const [remTick, setRemTick] = useState(0);
+  useEffect(() => { const iv = setInterval(() => setRemTick(t=>t+1), 30000); return () => clearInterval(iv); }, []);
+
+  // due = reminder tasks whose repeat matches today and time has passed,
+  // expanded to one row per assignee who hasn't done it yet
+  const dueRows = useMemo(() => {
+    const now = new Date();
+    const dow = now.getDay();
+    const mins = now.getHours()*60 + now.getMinutes();
+    const rows = [];
+    for (const c of taskList) {
+      if (!c.remind_time) continue;
+      const rep = c.repeat_days || "daily";
+      const okDay = rep === "daily" || (rep === "weekdays" && dow >= 1 && dow <= 5)
+        || (rep.startsWith("custom:") && rep.slice(7).split(",").map(Number).includes(dow));
+      if (!okDay) continue;
+      const [h, m] = String(c.remind_time).split(":").map(Number);
+      if (mins < h*60 + (m||0)) continue;
+      const assignees = c.assignee_ids?.length ? c.assignee_ids : [c.member_id];
+      for (const mid of assignees) {
+        rows.push({ chore: c, mid, done: c.done || (c.done_members ?? []).includes(mid) });
+      }
+    }
+    return rows;
+  }, [taskList, remTick]);
+  const duePending = dueRows.filter(r => !r.done);
+  const dueSig = duePending.map(r => `${r.chore.id}:${r.mid}`).sort().join("|");
+
+  const [remClosed, setRemClosed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("fk_rem_closed") ?? "{}"); } catch { return {}; }
+  });
+  const closeReminders = (minutes) => {
+    const rec = { sig: dueSig, until: minutes ? Date.now() + minutes*60000 : 0, day: todayISO() };
+    setRemClosed(rec);
+    try { localStorage.setItem("fk_rem_closed", JSON.stringify(rec)); } catch {}
+  };
+  // show when something is pending, unless snoozed, or dismissed for this
+  // exact pending set today (a NEW reminder becoming due re-opens it)
+  const reminderOpen = duePending.length > 0 && !(
+    (remClosed.until && Date.now() < remClosed.until) ||
+    (!remClosed.until && remClosed.day === todayISO() && remClosed.sig === dueSig)
+  );
+  const memberOf = (mid) => famMembers.find(f => f.id === mid);
+  const markTaskDone = async (choreId, mid) => {
+    try {
+      await fetch(`${API_URL}/api/chores/${choreId}/toggle`, { method:"POST", credentials:"include",
+        headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ date: todayISO(), member_id: mid }) });
+      loadTasks();
+    } catch (e) { console.error(e); }
+  };
+  const repeatText = (c) => {
+    const r = c.repeat_days || "daily";
+    if (r === "weekdays") return "weekdays";
+    if (r.startsWith("custom:")) { const n=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return r.slice(7).split(",").filter(Boolean).map(d=>n[Number(d)]).join(" "); }
+    return Number(String(c.remind_time).split(":")[0]) < 12 ? "every morning" : "every day";
+  };
+
   const [showRadar, setShowRadar] = useState(false);
   const [edit, setEdit] = useState(false);
   // Mobile "Arrange" mode: shows up/down controls on each stacked card.
@@ -1285,6 +1351,15 @@ export default function WallPanel() {
             </span>
           )}
         </div>
+        {duePending.length > 0 && !reminderOpen && (
+          <button onClick={()=>{ setRemClosed({}); try { localStorage.removeItem("fk_rem_closed"); } catch {} }}
+            style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(240,168,56,0.15)", color:C.motion,
+              border:`1px solid ${C.motion}`, borderRadius:999, padding: isMobile ? "6px 11px" : "8px 14px",
+              fontSize: isMobile ? 11 : 12, fontWeight:800, cursor:"pointer",
+              animation:"fkbusy 2.2s ease-in-out infinite" }}>
+            ⏰ {duePending.length} reminder{duePending.length===1?"":"s"}
+          </button>
+        )}
         {isMobile ? (
           <button onClick={()=>setArrange(a=>!a)} aria-label="Arrange cards"
             style={{ display:"flex", alignItems:"center", gap:6, background: arrange?C.accent:C.cardHi, color: arrange?C.bg0:C.sub, border:`1px solid ${arrange?C.accent:C.edge}`, borderRadius:10, padding:"8px 11px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
@@ -1365,6 +1440,60 @@ export default function WallPanel() {
       </div>
 
       {showRadar && <LiveRadar onClose={()=>setShowRadar(false)}/>}
+      {reminderOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(6,8,12,0.72)", zIndex:60,
+          display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{ width:"min(480px, 94vw)", background:C.card, border:`1px solid ${C.edge}`, borderRadius:18, padding:"18px 18px 12px" }}>
+            <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:12}}>
+              <Sun size={24} color={C.motion}/>
+              <div style={{flex:1, minWidth:0}}>
+                <div style={{fontSize:18, fontWeight:800}}>
+                  {new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 17 ? "Good afternoon" : "Good evening"}
+                </div>
+                <div style={{fontSize:12, color:C.sub}}>{duePending.length} reminder{duePending.length===1?"":"s"} to go</div>
+              </div>
+              <button onClick={()=>closeReminders(10)}
+                style={{ background:"transparent", border:`1px solid ${C.edge}`, color:C.sub, borderRadius:9, padding:"7px 11px", fontSize:12, cursor:"pointer" }}>
+                Snooze 10 min
+              </button>
+            </div>
+            <div style={{display:"flex", flexDirection:"column", gap:8, maxHeight:"56vh", overflowY:"auto"}}>
+              {dueRows.map(({ chore, mid, done }) => {
+                const fm = memberOf(mid);
+                return (
+                  <div key={`${chore.id}-${mid}`} style={{ display:"flex", alignItems:"center", gap:10,
+                    background:C.cardHi, border:`1px solid ${C.edge}`, borderRadius:12, padding:"10px 12px", opacity: done ? 0.55 : 1 }}>
+                    <span style={{ width:34, height:34, borderRadius:"50%", flexShrink:0, display:"grid", placeItems:"center",
+                      fontSize:16, background:`${fm?.color ?? "#6b8afd"}26`, border:`2px solid ${fm?.color ?? "#6b8afd"}` }}>
+                      {fm?.emoji ?? (fm?.name?.[0] ?? "?")}
+                    </span>
+                    <div style={{flex:1, minWidth:0}}>
+                      <div style={{fontSize:14, fontWeight:600, textDecoration: done ? "line-through" : "none",
+                        whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{chore.emoji} {chore.title}</div>
+                      <div style={{fontSize:11, color:C.sub}}>{fm?.name ?? mid} · {repeatText(chore)}</div>
+                    </div>
+                    {done ? (
+                      <CheckSquare size={20} color={C.secure} style={{flexShrink:0}}/>
+                    ) : (
+                      <button onClick={()=>markTaskDone(chore.id, mid)}
+                        style={{ flexShrink:0, background:C.secure, color:"#0c0e13", border:`1px solid ${C.secure}`,
+                          borderRadius:10, padding:"10px 18px", fontSize:13, fontWeight:800, cursor:"pointer" }}>
+                        Done
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:"flex", justifyContent:"center", marginTop:8}}>
+              <button onClick={()=>closeReminders(0)}
+                style={{ background:"transparent", border:"none", color:C.sub, fontSize:12, cursor:"pointer", padding:"6px 12px" }}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <BottomTabs/>
       <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>

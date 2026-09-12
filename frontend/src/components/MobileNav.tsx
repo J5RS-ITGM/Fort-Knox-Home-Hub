@@ -31,7 +31,7 @@ const MORE: [string, string, React.ComponentType<{ size?: number }>][] = [
   ["/control", "Control", SlidersHorizontal],
   ["/security", "Security", Shield],
   ["/gallery", "Gallery", Images],
-  ["/chores", "Chores", ListChecks],
+  ["/chores", "Tasks", ListChecks],
   ["/recipes", "Recipes", ChefHat],
   ["/sensors", "Sensors", Activity],
 ];

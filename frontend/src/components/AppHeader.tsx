@@ -20,7 +20,7 @@ const NAV: [string, string][] = [
   ["/security", "Security"],
   ["/calendar", "Calendar"],
   ["/gallery", "Gallery"],
-  ["/chores", "Chores"],
+  ["/chores", "Tasks"],
   ["/todo", "To-Do"],
   ["/control", "Control"],
   ["/recipes", "Recipes"],

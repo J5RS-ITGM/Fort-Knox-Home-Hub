@@ -39,7 +39,10 @@ class ChoreIn(BaseModel):
     title: str
     emoji: str = "⭐"
     points: int = 1
-    member_id: str
+    member_id: str | None = None          # legacy single assignee
+    assignee_ids: list[str] | None = None  # multi-assignee (preferred)
+    remind_time: str | None = None         # "HH:MM" -> this task is a reminder
+    repeat_days: str = "daily"             # daily | weekdays | custom:0,2,4
     sort: int = 0
 
 
@@ -48,20 +51,44 @@ class ChorePatch(BaseModel):
     emoji: str | None = None
     points: int | None = None
     member_id: str | None = None
+    assignee_ids: list[str] | None = None
+    remind_time: str | None = None   # "" clears the reminder
+    repeat_days: str | None = None
     sort: int | None = None
+
+
+def _assignees(c: models.Chore) -> list[str]:
+    ids = [x for x in (c.assignee_ids or "").split(",") if x]
+    return ids or ([c.member_id] if c.member_id else [])
 
 
 @router.get("/chores")
 async def list_chores(date: str, db: AsyncSession = Depends(get_session)) -> list[dict]:
-    """All chores plus whether each is done on `date` (YYYY-MM-DD)."""
+    """All tasks plus per-member done state on `date` (YYYY-MM-DD)."""
     chores = (await db.execute(select(models.Chore).order_by(models.Chore.sort, models.Chore.created_at))).scalars().all()
-    done_rows = (await db.execute(select(models.ChoreCompletion.chore_id).where(models.ChoreCompletion.date == date))).scalars().all()
-    done = set(done_rows)
-    return [
-        {"id": c.id, "title": c.title, "emoji": c.emoji, "points": c.points,
-         "member_id": c.member_id, "sort": c.sort, "done": c.id in done}
-        for c in chores
-    ]
+    rows = (await db.execute(
+        select(models.ChoreCompletion.chore_id, models.ChoreCompletion.member_id)
+        .where(models.ChoreCompletion.date == date)
+    )).all()
+    done_members: dict[str, set] = {}
+    legacy_done: set = set()
+    for cid, mid in rows:
+        if mid is None:
+            legacy_done.add(cid)
+        else:
+            done_members.setdefault(cid, set()).add(mid)
+    out = []
+    for c in chores:
+        assignees = _assignees(c)
+        dm = sorted(done_members.get(c.id, set()))
+        all_done = c.id in legacy_done or (len(assignees) > 0 and all(a in dm for a in assignees))
+        out.append({
+            "id": c.id, "title": c.title, "emoji": c.emoji, "points": c.points,
+            "member_id": c.member_id, "assignee_ids": assignees,
+            "remind_time": c.remind_time, "repeat_days": c.repeat_days,
+            "sort": c.sort, "done": all_done, "done_members": dm,
+        })
+    return out
 
 
 @router.get("/chores/completions")
@@ -70,7 +97,7 @@ async def chore_completions(start: str, end: str, db: AsyncSession = Depends(get
     rows = (await db.execute(
         select(models.ChoreCompletion).where(models.ChoreCompletion.date >= start, models.ChoreCompletion.date <= end)
     )).scalars().all()
-    return [{"chore_id": r.chore_id, "date": r.date} for r in rows]
+    return [{"chore_id": r.chore_id, "date": r.date, "member_id": r.member_id} for r in rows]
 
 
 @router.post("/chores", status_code=201)
@@ -81,10 +108,18 @@ async def create_chore(
 ) -> dict:
     if not body.title.strip():
         raise HTTPException(422, "title required")
-    if await db.get(models.FamilyMember, body.member_id) is None:
-        raise HTTPException(404, "no such family member")
+    ids = body.assignee_ids or ([body.member_id] if body.member_id else [])
+    ids = [x for x in dict.fromkeys(ids) if x]  # dedupe, keep order
+    if not ids:
+        raise HTTPException(422, "at least one assignee required")
+    for mid in ids:
+        if await db.get(models.FamilyMember, mid) is None:
+            raise HTTPException(404, f"no such family member: {mid}")
+    rt = (body.remind_time or "").strip() or None
     c = models.Chore(title=body.title.strip(), emoji=body.emoji, points=max(1, body.points),
-                     member_id=body.member_id, sort=body.sort)
+                     member_id=ids[0], assignee_ids=",".join(ids),
+                     remind_time=rt, repeat_days=body.repeat_days or "daily",
+                     sort=body.sort)
     db.add(c)
     await db.commit()
     await audit(db, admin.username, "chore_added", c.title)
@@ -107,10 +142,24 @@ async def patch_chore(
         c.emoji = body.emoji
     if body.points is not None:
         c.points = max(1, body.points)
-    if body.member_id is not None:
+    if body.assignee_ids is not None:
+        ids = [x for x in dict.fromkeys(body.assignee_ids) if x]
+        if not ids:
+            raise HTTPException(422, "at least one assignee required")
+        for mid in ids:
+            if await db.get(models.FamilyMember, mid) is None:
+                raise HTTPException(404, f"no such family member: {mid}")
+        c.assignee_ids = ",".join(ids)
+        c.member_id = ids[0]
+    elif body.member_id is not None:
         if await db.get(models.FamilyMember, body.member_id) is None:
             raise HTTPException(404, "no such family member")
         c.member_id = body.member_id
+        c.assignee_ids = body.member_id
+    if body.remind_time is not None:
+        c.remind_time = body.remind_time.strip() or None
+    if body.repeat_days is not None:
+        c.repeat_days = body.repeat_days or "daily"
     if body.sort is not None:
         c.sort = body.sort
     await db.commit()
@@ -134,6 +183,7 @@ async def delete_chore(
 
 class ToggleIn(BaseModel):
     date: str  # YYYY-MM-DD
+    member_id: str | None = None  # per-member toggle; None = legacy whole-task
 
 
 @router.post("/chores/{chore_id}/toggle")
@@ -146,19 +196,21 @@ async def toggle_chore(
     c = await db.get(models.Chore, chore_id)
     if c is None:
         raise HTTPException(404, "no such chore")
-    existing = (await db.execute(
-        select(models.ChoreCompletion).where(
-            models.ChoreCompletion.chore_id == chore_id, models.ChoreCompletion.date == body.date
-        )
-    )).scalar_one_or_none()
+    q = select(models.ChoreCompletion).where(
+        models.ChoreCompletion.chore_id == chore_id, models.ChoreCompletion.date == body.date
+    )
+    q = q.where(models.ChoreCompletion.member_id == body.member_id) if body.member_id \
+        else q.where(models.ChoreCompletion.member_id.is_(None))
+    existing = (await db.execute(q)).scalars().first()
+    who = f" [{body.member_id}]" if body.member_id else ""
     if existing:
         await db.delete(existing)
         await db.commit()
-        await audit(db, user.username, "chore_undone", f"{c.title} ({body.date})")
+        await audit(db, user.username, "chore_undone", f"{c.title} ({body.date}){who}")
         return {"done": False}
-    db.add(models.ChoreCompletion(chore_id=chore_id, date=body.date))
+    db.add(models.ChoreCompletion(chore_id=chore_id, date=body.date, member_id=body.member_id))
     await db.commit()
-    await audit(db, user.username, "chore_done", f"{c.title} ({body.date})")
+    await audit(db, user.username, "chore_done", f"{c.title} ({body.date}){who}")
     return {"done": True}
 
 

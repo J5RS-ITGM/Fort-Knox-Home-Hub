@@ -156,8 +156,11 @@ class ServiceAllow(Base):
 
 # -- family modules (Chores / Calendar / Gallery) ------------------------------
 class Chore(Base):
-    """A recurring chore assigned to one family member. v1 model: every
-    chore is available daily; completion is tracked per calendar date."""
+    """A task (nee chore) for one or more family members. Tasks with a
+    remind_time are reminders: they pop up on the wall panel when due.
+    assignee_ids is a CSV of family_member ids; member_id is kept as the
+    first assignee for back-compat. repeat_days: "daily" | "weekdays" |
+    "custom:0,2,4" (JS getDay() ints)."""
 
     __tablename__ = "chores"
 
@@ -166,17 +169,24 @@ class Chore(Base):
     emoji: Mapped[str] = mapped_column(String(16), nullable=False, default="⭐")
     points: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     member_id: Mapped[str] = mapped_column(ForeignKey("family_members.id", ondelete="CASCADE"), nullable=False)
+    assignee_ids: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    remind_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # HH:MM local
+    repeat_days: Mapped[str] = mapped_column(String(30), nullable=False, default="daily")
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ChoreCompletion(Base):
+    """Per-member, per-date completion. member_id NULL = legacy whole-task
+    completion (pre-multi-assignee rows)."""
+
     __tablename__ = "chore_completions"
-    __table_args__ = (UniqueConstraint("chore_id", "date", name="uq_chore_date"),)
+    __table_args__ = (UniqueConstraint("chore_id", "date", "member_id", name="uq_chore_date_member"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     chore_id: Mapped[str] = mapped_column(ForeignKey("chores.id", ondelete="CASCADE"), nullable=False)
     date: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD (home-local)
+    member_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     done_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

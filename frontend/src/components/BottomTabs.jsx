@@ -16,7 +16,7 @@ const TABS = [
   { href: "/security", label: "Security", Icon: Shield },
   { href: "/calendar", label: "Calendar", Icon: CalendarDays },
   { href: "/gallery", label: "Gallery", Icon: Images },
-  { href: "/chores", label: "Chores", Icon: ListChecks },
+  { href: "/chores", label: "Tasks", Icon: ListChecks },
   { href: "/todo", label: "To-Do", Icon: ListTodo },
   { href: "/recipes", label: "Recipes", Icon: ChefHat },
   { href: "/sensors", label: "Sensors", Icon: Activity },

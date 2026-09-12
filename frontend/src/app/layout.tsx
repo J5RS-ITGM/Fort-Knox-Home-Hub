@@ -4,6 +4,7 @@ import SWRegister from "@/components/SWRegister";
 import SensorFlash from "@/components/SensorFlash";
 import ThemeProvider from "@/components/ThemeProvider";
 import MobileNav from "@/components/MobileNav";
+import KioskKeyboard from "@/components/KioskKeyboard";
 import { themeBootScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
@@ -35,6 +36,7 @@ export default function RootLayout({
         <SensorFlash />
         <MobileNav />
         <div className="mobile-nav-pad">{children}</div>
+        <KioskKeyboard />
       </body>
     </html>
   );
