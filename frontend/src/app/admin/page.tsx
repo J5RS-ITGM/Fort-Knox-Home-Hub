@@ -224,7 +224,7 @@ function DevicesTab({ placements, entities, busy, act }: { placements: Placement
   const unplacedLights = placeable.filter((e) => e.domain === "switch" || e.domain === "light");
   const [sel, setSel] = useState("");
   const save = (p: Placement, body: Partial<Placement>) =>
-    act(() => api(`/api/placements/${p.entity_id}`, { method: "PUT", body: JSON.stringify({ ...p, ...body }) }));
+    act(() => api(`/api/placements/${encodeURIComponent(p.entity_id)}`, { method: "PUT", body: JSON.stringify({ ...p, ...body }) }));
   return (
     <section>
       <h2 className={sectionTitle}>Sensor placements <span className="normal-case tracking-normal">(drag mode also available on the Security board)</span></h2>

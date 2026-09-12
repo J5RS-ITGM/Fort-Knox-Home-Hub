@@ -1028,8 +1028,8 @@ export default function SecurityBoard() {
     const e = entities.get(entityId);
     const row = { entity_id: entityId, room: "", floor, x, y, icon: null };
     setPlacements(prev => [...(prev ?? []), row]);
-    fetch(`${API_URL}/api/placements/${entityId}`, {
-      method:"PUT", headers:{ "Content-Type":"application/json" },
+    fetch(`${API_URL}/api/placements/${encodeURIComponent(entityId)}`, {
+      method:"PUT", headers:{ "Content-Type":"application/json" }, credentials:"include",
       body: JSON.stringify(row),
     })
       .then(r => setSaveNote(r.ok ? `Placed ${e?.friendly_name ?? entityId}` : "Place failed"))
@@ -1040,7 +1040,7 @@ export default function SecurityBoard() {
   // remove a placement (send sensor back to the tray)
   const unplaceSensor = useCallback((entityId) => {
     setPlacements(prev => (prev ?? []).filter(p => p.entity_id !== entityId));
-    fetch(`${API_URL}/api/placements/${entityId}`, { method:"DELETE" }).catch(() => {});
+    fetch(`${API_URL}/api/placements/${encodeURIComponent(entityId)}`, { method:"DELETE", credentials:"include" }).catch(() => {});
     setSelected(null);
   }, []);
 
@@ -1132,17 +1132,29 @@ export default function SecurityBoard() {
   // The isometric ThreeScene calls onMoved(id, x, z) with 3 args (persist);
   // the 2D view calls with a 4th `live` flag to stream during drag.
   const onMoved = useCallback((entityId, x, z, live = false) => {
+    // Wall-anchored types (door/window/lock contacts, wall-sconce lights)
+    // snap to the nearest wall AT SAVE TIME, so the stored position is
+    // exactly what every view renders and what the admin table shows.
+    const ent = entities.get(baseEntity(entityId));
+    const t = typeFor(ent);
+    const sconce = t === "light" && (deviceCfg.icons?.[baseEntity(entityId)] ?? "ceiling") === "sconce";
+    const pRow = placements?.find(q => q.entity_id === entityId);
+    const planFor = (pRow?.floor ?? 0) === 0 ? plan : plan2;
+    if ((t === "contact" || sconce) && planFor) {
+      const pp = planFromGrid(x, z);
+      const sn = snapToWall(planFor, pp.px, pp.py);
+      if (sn) { const g2 = gridFromPlan(sn.px, sn.py); x = g2.x; z = g2.y; }
+    }
     setPlacements(prev => prev?.map(p => p.entity_id === entityId ? { ...p, x, y: z } : p) ?? prev);
     if (live) return; // mid-drag: update local only, don't hit the API on every frame
-    const p = placements?.find(q => q.entity_id === entityId);
-    fetch(`${API_URL}/api/placements/${entityId}`, {
-      method:"PUT", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ entity_id: entityId, room: p?.room ?? "", floor: p?.floor ?? 0, x, y: z, icon: p?.icon ?? null }),
+    fetch(`${API_URL}/api/placements/${encodeURIComponent(entityId)}`, {
+      method:"PUT", headers:{ "Content-Type":"application/json" }, credentials:"include",
+      body: JSON.stringify({ entity_id: entityId, room: pRow?.room ?? "", floor: pRow?.floor ?? 0, x, y: z, icon: pRow?.icon ?? null }),
     })
-      .then(r => setSaveNote(r.ok ? "Position saved" : "Save failed"))
+      .then(r => setSaveNote(r.ok ? "Position saved" : `Save failed (${r.status})`))
       .catch(() => setSaveNote("Save failed — offline?"));
     setTimeout(() => setSaveNote(""), 2500);
-  }, [placements]);
+  }, [placements, entities, deviceCfg, plan, plan2]);
 
   const summary = useMemo(() => {
     let open=0, motion=0, low=0, off=0;
