@@ -48,6 +48,29 @@ export async function fetchPlan() {
 }
 
 // High-contrast palette for plan geometry (see header).
+// Snap a plan-px point onto the nearest wall centerline. Contact sensors
+// render as door/window elements set INTO a wall, so their marker position
+// snaps to the closest wall within `maxDist` px and inherits the wall's
+// orientation. Returns null when no wall is close enough (element floats
+// where dropped, unsnapped).
+export function snapToWall(plan, px, py, maxDist = 46) {
+  let best = null;
+  for (const w of plan?.walls ?? []) {
+    const cx = Math.min(Math.max(px, w.x), w.x + w.w);
+    const cy = Math.min(Math.max(py, w.y), w.y + w.h);
+    const d = Math.hypot(px - cx, py - cy);
+    if (d > maxDist || (best && d >= best.d)) continue;
+    const horiz = w.w >= w.h;
+    best = {
+      d, horiz,
+      px: horiz ? Math.min(Math.max(px, w.x + 8), w.x + w.w - 8) : w.x + w.h / 2 + (w.w - w.h) / 2,
+      py: horiz ? w.y + w.h / 2 : Math.min(Math.max(py, w.y + 8), w.y + w.h - 8),
+    };
+    if (!horiz) best.px = w.x + w.w / 2;
+  }
+  return best;
+}
+
 export const PLAN_C = {
   slab: "#10141c",
   slabEdge: "#2b3956",

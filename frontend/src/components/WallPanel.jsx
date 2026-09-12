@@ -7,7 +7,7 @@ import {
   Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause, Warehouse,
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
-import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState } from "@/lib/planScene";
+import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState, snapToWall, gridFromPlan, planFromGrid } from "@/lib/planScene";
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
@@ -56,7 +56,10 @@ function boardStateFor(sensor, entity) {
   if (sensor.type === "light") state = on ? "lit" : "dark"; // lights are never "open"
   else if (sensor.type === "motion") state = on ? "motion" : "secure";
   else if (sensor.type === "smoke") state = on ? "triggered" : "secure";
-  else state = on ? "open" : "secure"; // contact + leak: on == open/WET
+  else {
+    const openish = on || entity.state === "open" || entity.state === "unlocked";
+    state = openish ? "open" : "secure"; // contact + leak + lock: open/WET/unlocked
+  }
   const battery = typeof entity.attributes?.battery === "number" ? entity.attributes.battery : 100;
   return { state, battery };
 }
@@ -70,9 +73,11 @@ function colorFor(type, live, armed) {
   return C.secure;
 }
 
-function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, themeTick }) {
+function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, themeTick, deviceIcons, camCfg, camLocked, onCamChange, onToggleCamLock }) {
   const mountRef = useRef();
   const zoomApi = useRef(null);
+  const lockedRef = useRef(camLocked);
+  useEffect(() => { lockedRef.current = camLocked; }, [camLocked]);
   useEffect(() => {
     const mount = mountRef.current;
     let W = mount.clientWidth, H = mount.clientHeight;
@@ -82,18 +87,23 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     const cam = new THREE.OrthographicCamera(-d*aspect, d*aspect, d, -d, 0.1, 100);
     // Fill the tile: start zoomed so the model uses the space, and let the
     // user wheel / pinch / button-zoom and drag-pan from there.
-    let zoom = 1.5;
-    const target = new THREE.Vector3(0, 1.4, 0);
+    let zoom = camCfg?.zoom ?? 1.5;
+    let az = camCfg?.az ?? Math.PI / 4; // orbit angle around the model
+    const R = 15.56, CAMY = 12;
+    const target = new THREE.Vector3(camCfg?.tx ?? 0, 1.4, camCfg?.tz ?? 0);
+    const emitCam = () => onCamChange?.({ zoom, az, tx: target.x, tz: target.z });
     const applyCam = () => {
       cam.zoom = zoom;
-      cam.position.set(target.x + 11, 12, target.z + 11);
+      cam.position.set(target.x + R * Math.cos(az), CAMY, target.z + R * Math.sin(az));
       cam.lookAt(target.x, 1.4, target.z);
       cam.updateProjectionMatrix();
     };
     applyCam();
-    const setZoom = (z) => { zoom = Math.min(4, Math.max(0.6, z)); applyCam(); };
+    const setZoom = (z) => { if (lockedRef.current) return; zoom = Math.min(4, Math.max(0.6, z)); applyCam(); emitCam(); };
+    const rotate = (d) => { if (lockedRef.current) return; az += d; applyCam(); emitCam(); };
     zoomApi.current = { in: () => setZoom(zoom * 1.25), out: () => setZoom(zoom / 1.25),
-      reset: () => { target.set(0, 1.4, 0); setZoom(1.5); } };
+      rotL: () => rotate(-Math.PI / 12), rotR: () => rotate(Math.PI / 12),
+      reset: () => { if (lockedRef.current) return; target.set(0, 1.4, 0); az = Math.PI / 4; zoom = 1.5; applyCam(); emitCam(); } };
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
     renderer.setSize(W,H); mount.appendChild(renderer.domElement); renderer.domElement.style.touchAction="pan-y";
@@ -150,29 +160,58 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
       floorGroups[l.floor]?.add(spr);
     });
 
-    // Markers: live placements (grid coords, y->z), same as the board.
-    // Lights render as little lamps (cone shade + bulb + floor glow), not pins.
+    // Markers mirror the Security board exactly (same placements, same
+    // rendering): contacts are wall elements (green closed / red open),
+    // lights are ceiling/sconce fixtures with glow, motion/leak/smoke are
+    // small diamonds. No pins anywhere.
     const markers = [];
+    const _g0 = gridFromPlan(0, 0), _g1 = gridFromPlan(100, 0);
+    const paneScale = Math.abs(_g1.x - _g0.x) / 100;
     (placements ?? []).forEach(s => {
-      const y = s.floor*2.4 + 0.55; const grp = new THREE.Group(); grp.position.set(s.x,y,s.y);
+      const y = s.floor*2.4 + 0.55; const grp = new THREE.Group();
       const isLight = s.type === "light";
-      let sph, drop = null, ring = null, glow = null, bulb = null;
-      if (isLight) {
-        sph = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.26, 20), new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.4 }));
-        sph.rotation.x = Math.PI; grp.add(sph); // shade opening downward
-        bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 }));
-        bulb.position.y = -0.16; grp.add(bulb);
-        glow = new THREE.Mesh(new THREE.CircleGeometry(0.8, 36), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false }));
-        glow.rotation.x = -Math.PI/2; glow.position.y = -0.53; grp.add(glow);
-      } else {
-        drop = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,0.5,6), new THREE.MeshBasicMaterial({ color:hx(C.secure), transparent:true, opacity:0.5 }));
-        drop.position.y=-0.25; grp.add(drop);
-        sph = new THREE.Mesh(new THREE.SphereGeometry(0.26,20,20), new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 }));
+      const isContact = s.type === "contact";
+      let gx = s.x, gz = s.y, horiz = true;
+      if (isContact && plan && s.floor === 0) {
+        const pp = planFromGrid(s.x, s.y);
+        const sn = snapToWall(plan, pp.px, pp.py);
+        if (sn) { const g2 = gridFromPlan(sn.px, sn.py); gx = g2.x; gz = g2.y; horiz = sn.horiz; }
+      }
+      grp.position.set(gx, y, gz);
+      const styleIc = isLight ? (deviceIcons?.[s.entity_id.replace(/#\d+$/, "")] ?? "ceiling") : null;
+      let sph, ring = null, glow = null, bulb = null;
+      if (isContact) {
+        const L = Math.max(0.5, 46 * paneScale);
+        const isWin = String(s.dc ?? "") === "window";
+        sph = new THREE.Mesh(
+          new THREE.BoxGeometry(horiz ? L : 0.12, isWin ? 0.5 : 0.8, horiz ? 0.12 : L),
+          new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, transparent:true, opacity:0.92, roughness:0.35 }));
+        sph.position.y = isWin ? 0.12 : 0;
         grp.add(sph);
         ring = new THREE.Mesh(new THREE.RingGeometry(0.36,0.46,32), new THREE.MeshBasicMaterial({ color:hx(C.open), transparent:true, opacity:0.55, side:THREE.DoubleSide }));
-        ring.rotation.x=-Math.PI/2; ring.position.y=-0.22; ring.visible=false; grp.add(ring);
+        ring.rotation.x=-Math.PI/2; ring.position.y=-0.5; ring.visible=false; grp.add(ring);
+      } else if (isLight) {
+        if (styleIc === "sconce") {
+          sph = new THREE.Mesh(new THREE.BoxGeometry(0.16,0.2,0.16), new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.45 }));
+          bulb = new THREE.Mesh(new THREE.SphereGeometry(0.08,12,12), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 }));
+          bulb.position.y = -0.18; grp.add(bulb);
+          glow = new THREE.Mesh(new THREE.CircleGeometry(0.42,32), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false }));
+        } else {
+          sph = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.26, 20), new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.4 }));
+          sph.rotation.x = Math.PI;
+          bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 }));
+          bulb.position.y = -0.16; grp.add(bulb);
+          glow = new THREE.Mesh(new THREE.CircleGeometry(0.8, 36), new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false }));
+        }
+        grp.add(sph);
+        glow.rotation.x = -Math.PI/2; glow.position.y = -0.53; grp.add(glow);
+      } else {
+        sph = new THREE.Mesh(new THREE.OctahedronGeometry(0.17), new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 }));
+        grp.add(sph);
+        ring = new THREE.Mesh(new THREE.RingGeometry(0.28,0.38,32), new THREE.MeshBasicMaterial({ color:hx(C.open), transparent:true, opacity:0.55, side:THREE.DoubleSide }));
+        ring.rotation.x=-Math.PI/2; ring.position.y=-0.5; ring.visible=false; grp.add(ring);
       }
-      scene.add(grp); markers.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sph, drop, ring, glow, bulb });
+      scene.add(grp); markers.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sph, drop:null, ring, glow, bulb });
     });
 
     let raf, t=0;
@@ -193,8 +232,9 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
         }
         const alert=chex===C.open;
         m.sph.material.color.copy(col); m.sph.material.emissive.copy(col); m.sph.material.emissiveIntensity=alert?1.4:0.5;
-        m.drop.material.color.copy(col); m.sph.scale.setScalar(alert?1+Math.sin(t*4)*0.18:1);
-        m.ring.visible=alert; if(alert) m.ring.material.color.copy(col);
+        if (m.drop) m.drop.material.color.copy(col);
+        m.sph.scale.setScalar(alert?1+Math.sin(t*4)*0.18:1);
+        if (m.ring) { m.ring.visible=alert; if(alert) m.ring.material.color.copy(col); }
       });
       renderer.render(scene,cam); raf=requestAnimationFrame(animate);
     }
@@ -202,8 +242,8 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     function onResize(){ W=mount.clientWidth||W; H=mount.clientHeight||H; const a=W/H; cam.left=-d*a; cam.right=d*a; cam.top=d; cam.bottom=-d; cam.updateProjectionMatrix(); renderer.setSize(W,H); }
     const ro=new ResizeObserver(onResize); ro.observe(mount);
     // wheel zoom + drag pan + pinch on the panel board
-    const panRight = new THREE.Vector3(1, 0, -1).normalize();
-    const panUp = new THREE.Vector3(-1, 0, -1).normalize();
+    const panRight = () => new THREE.Vector3(-Math.sin(az), 0, Math.cos(az));
+    const panUp = () => new THREE.Vector3(-Math.cos(az), 0, -Math.sin(az));
     const onWheel = (e) => { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0012)); };
     const pointers = new Map(); let pinchDist = 0, panning = null;
     const onPD = (e) => {
@@ -215,14 +255,14 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) { const [a,b]=[...pointers.values()]; const dist=Math.hypot(a.x-b.x,a.y-b.y);
         if (pinchDist>0) setZoom(zoom*(dist/pinchDist)); pinchDist=dist; return; }
-      if (!panning) return;
+      if (!panning || lockedRef.current) return;
       const worldPerPx = (cam.right - cam.left) / cam.zoom / W;
-      target.addScaledVector(panRight, -(e.clientX - panning.x) * worldPerPx);
-      target.addScaledVector(panUp, (e.clientY - panning.y) * worldPerPx * 1.35);
+      target.addScaledVector(panRight(), -(e.clientX - panning.x) * worldPerPx);
+      target.addScaledVector(panUp(), (e.clientY - panning.y) * worldPerPx * 1.35);
       target.x = Math.max(-8, Math.min(8, target.x)); target.z = Math.max(-8, Math.min(8, target.z));
       applyCam(); panning = { x: e.clientX, y: e.clientY };
     };
-    const onPU = (e) => { pointers.delete(e.pointerId); if (pointers.size < 2) pinchDist = 0; panning = null; };
+    const onPU = (e) => { pointers.delete(e.pointerId); if (pointers.size < 2) pinchDist = 0; if (panning && !lockedRef.current) emitCam(); panning = null; };
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
     renderer.domElement.addEventListener("pointerdown", onPD);
     renderer.domElement.addEventListener("pointermove", onPM);
@@ -237,18 +277,26 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
       renderer.domElement.removeEventListener("pointercancel", onPU);
       zoomApi.current = null;
       renderer.dispose(); if(renderer.domElement.parentNode) mount.removeChild(renderer.domElement); };
-  }, [floorView, plan, placements, labels, liveStateRef, armedRef, themeTick]);
+  }, [floorView, plan, placements, labels, liveStateRef, armedRef, themeTick, deviceIcons]);  // camCfg init-only by design
   const zb = { width:34, height:34, display:"grid", placeItems:"center", background:"rgba(15,17,22,0.8)",
     color:C.text, fontSize:16, fontWeight:700, border:`1px solid ${C.edge}`, borderRadius:9, cursor:"pointer" };
   return (
     <div style={{ width:"100%", height:"100%", position:"relative" }}>
       <div ref={mountRef} style={{ width:"100%", height:"100%", touchAction:"none" }} />
       <div style={{ position:"absolute", right:10, bottom:10, display:"flex", flexDirection:"column", gap:6, zIndex:3 }}>
-        <button style={zb} aria-label="Zoom in" onClick={()=>zoomApi.current?.in()}>+</button>
-        <button style={zb} aria-label="Zoom out" onClick={()=>zoomApi.current?.out()}>−</button>
-        <button style={{...zb, fontSize:12}} aria-label="Reset view" onClick={()=>zoomApi.current?.reset()}>⤾</button>
-      </div>
-    </div>
+        {!camLocked && (<>
+          <button style={zb} aria-label="Zoom in" onClick={()=>zoomApi.current?.in()}>+</button>
+          <button style={zb} aria-label="Zoom out" onClick={()=>zoomApi.current?.out()}>−</button>
+          <button style={{...zb, fontSize:13}} aria-label="Rotate left" onClick={()=>zoomApi.current?.rotL()}>⟲</button>
+          <button style={{...zb, fontSize:13}} aria-label="Rotate right" onClick={()=>zoomApi.current?.rotR()}>⟳</button>
+          <button style={{...zb, fontSize:11}} aria-label="Reset view" onClick={()=>zoomApi.current?.reset()}>reset</button>
+        </>)}
+        <button style={{...zb, background: camLocked ? C.accent : "rgba(15,17,22,0.8)", color: camLocked ? "#0c0e13" : C.text }}
+          aria-label={camLocked ? "Unlock view" : "Lock view"} title={camLocked ? "View locked - tap to unlock" : "Lock this zoom & angle"}
+          onClick={()=>onToggleCamLock?.()}>
+          {camLocked ? <Lock size={15}/> : <Unlock size={15}/>}
+        </button>
+      </div>    </div>
   );
 }
 
@@ -446,7 +494,7 @@ const rBtn = { width:42, height:42, borderRadius:11, background:C.cardHi, color:
 
 // ================= STATIC TILE CONTENT (pending modules) =====================
 const SCENES = [ ["Morning",Sun], ["Movie",Play], ["Away",Lock], ["Night",Moon] ];
-const EVENTS = [ ["7:30a","School drop-off"], ["1:00p","Dentist — Maya"], ["6:30p","Soccer practice"] ];
+// calendar events come live from /api/events (stock demo list retired)
 const FORECAST = [ ["Now","72°",Sun], ["1p","75°",Sun], ["2p","76°",Sun], ["3p","74°",Cloud], ["4p","71°",Cloud], ["5p","68°",Droplets] ];
 
 // ================= CLOCK =====================
@@ -567,7 +615,10 @@ export default function WallPanel() {
     return "contact";
   };
   const placements = useMemo(
-    () => placementRows.map((p) => ({ ...p, type: typeOf(entities.get(baseEntity(p.entity_id))) })),
+    () => placementRows.map((p) => {
+      const e = entities.get(baseEntity(p.entity_id));
+      return { ...p, type: typeOf(e), dc: String(e?.attributes?.device_class ?? "") };
+    }),
     [placementRows, entities]
   );
   const labels = useMemo(() => defaultLabels(plan, ROOMS, boardLabels), [plan, boardLabels]);
@@ -640,6 +691,63 @@ export default function WallPanel() {
     const iv = setInterval(load, 60000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
+  // Today's real calendar events (same store as the Calendar page)
+  const [events, setEvents] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      const d = new Date(); const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      fetch(`${API_URL}/api/events?start=${iso}&end=${iso}`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((rows) => { if (alive) setEvents(rows.slice(0, 8)); })
+        .catch(() => {});
+    };
+    load();
+    const iv = setInterval(load, 300000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  const fmtEventTime = (t) => {
+    if (!t) return "All day";
+    const [h, m] = String(t).split(":").map(Number);
+    if (Number.isNaN(h)) return t;
+    const ampm = h >= 12 ? "p" : "a";
+    return `${((h + 11) % 12) + 1}:${String(m ?? 0).padStart(2, "0")}${ampm}`;
+  };
+
+  // Shared device display config (hidden devices + light icon styles) -
+  // one server record so the kiosk, phones, and admin page all agree.
+  const [deviceCfg, setDeviceCfg] = useState({ hidden: [], icons: {} });
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch(`${API_URL}/api/device-config`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d) setDeviceCfg(d); })
+      .catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  const putDeviceCfg = (next) => {
+    setDeviceCfg(next);
+    fetch(`${API_URL}/api/device-config`, { method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }).catch(() => {});
+  };
+
+  // Press feedback: Z-Wave locks answer slowly, so a tapped button pulses
+  // as "working" until the entity state actually changes (or 12s passes).
+  const [pendingActs, setPendingActs] = useState({}); // entity_id -> state at press
+  const markPending = (id, stateAtPress) => setPendingActs((p) => ({ ...p, [id]: { st: stateAtPress, ts: Date.now() } }));
+  useEffect(() => {
+    setPendingActs((prev) => {
+      let changed = false; const next = { ...prev };
+      for (const [id, rec] of Object.entries(prev)) {
+        const cur = entities.get(id)?.state;
+        if ((cur && cur !== rec.st) || Date.now() - rec.ts > 12000) { delete next[id]; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [entities]);
+
   const [showRadar, setShowRadar] = useState(false);
   const [edit, setEdit] = useState(false);
   // Mobile "Arrange" mode: shows up/down controls on each stacked card.
@@ -761,14 +869,20 @@ export default function WallPanel() {
     setTimeout(() => setGaragePulsing(false), 2500); // opener cycle debounce
   };
 
-  // Devices tile hidden list (e.g. spare ZEN16 relay channels): stored on
-  // the devices layout entry; toggled in edit/arrange mode.
-  const hiddenDevices = layout.devices?.hidden ?? [];
-  const toggleDeviceHidden = (id) => setLayout(prev => {
-    const cur = prev.devices?.hidden ?? [];
-    const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
-    return { ...prev, devices: { ...prev.devices, hidden: next } };
-  });
+  // Devices tile hidden list: lives in the shared server config so the
+  // kiosk, phones, and the Devices admin page all agree. The old per-layout
+  // list is read as a legacy fallback but writes go to the shared config.
+  const hiddenDevices = useMemo(
+    () => [...new Set([...(deviceCfg.hidden ?? []), ...(layout.devices?.hidden ?? [])])],
+    [deviceCfg.hidden, layout.devices]
+  );
+  const toggleDeviceHidden = (id) => {
+    const cur = new Set(hiddenDevices);
+    cur.has(id) ? cur.delete(id) : cur.add(id);
+    putDeviceCfg({ ...deviceCfg, hidden: [...cur] });
+    // clear the legacy layout copy so the shared list is the single source
+    if (layout.devices?.hidden?.length) setLayout(prev => ({ ...prev, devices: { ...prev.devices, hidden: [] } }));
+  };
 
 
   const liveStateRef = useRef(liveState); const armedRef = useRef(armed);
@@ -815,6 +929,7 @@ export default function WallPanel() {
 
   // ---- grid geometry ----
   const gridRef = useRef();
+  const camSaveRef = useRef(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
@@ -869,7 +984,7 @@ export default function WallPanel() {
         l.x = Math.max(0, Math.min(GRID_COLS - l.w, start.current.x + dx));
         l.y = Math.max(0, Math.min(1 + UNIT_ROWS - l.h, start.current.y + dy));
       } else {
-        l.w = Math.max(2, Math.min(GRID_COLS - l.x, start.current.w + dx));
+        l.w = Math.max(1, Math.min(GRID_COLS - l.x, start.current.w + dx));
         l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, start.current.h + dy));
       }
       return { ...prev, [id]: l };
@@ -894,7 +1009,13 @@ export default function WallPanel() {
     ),
     board: (
       <Tile edit={edit} onToggleVisible={()=>setVisible("board",false)} style={{padding:0}}>
-        <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView} themeTick={themeTick}/></div>
+        <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView} themeTick={themeTick}
+          deviceIcons={deviceCfg.icons}
+          camCfg={layout.board?.cam}
+          camLocked={!!layout.board?.camLocked}
+          onCamChange={(cam)=>{ clearTimeout(camSaveRef.current); camSaveRef.current = setTimeout(()=>setLayout(prev=>({ ...prev, board:{ ...prev.board, cam } })), 400); }}
+          onToggleCamLock={()=>setLayout(prev=>({ ...prev, board:{ ...prev.board, camLocked: !prev.board?.camLocked } }))}
+        /></div>
         <div style={{position:"absolute", top:14, left:16, fontSize:11, fontWeight:700, letterSpacing:1.3, textTransform:"uppercase", color:C.sub}}>Home Map</div>
         {edit && <button onClick={()=>setVisible("board",false)} style={{position:"absolute", top:12, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer"}}><EyeOff size={15}/></button>}
         {/* floor tabs — stacked, below the title, clear of the legend */}
@@ -962,17 +1083,19 @@ export default function WallPanel() {
     ),
     calendar: (
       <Tile title="Today" edit={edit} onToggleVisible={()=>setVisible("calendar",false)}>
-        <div style={{display:"flex", flexDirection:"column", gap:1, justifyContent:"center", height:"100%"}}>
-          {EVENTS.map(([t,l])=>(
-            <div key={l} style={{display:"flex", gap:10, padding:"6px 0", alignItems:"center"}}>
-              <span style={{color:C.accent, fontWeight:800, minWidth:48, fontSize:13}}>{t}</span><span style={{fontSize:14}}>{l}</span>
+        <div style={{display:"flex", flexDirection:"column", gap:1, justifyContent: events.length ? "flex-start" : "center", height:"100%", overflowY:"auto"}}>
+          {events.length === 0 && <span style={{fontSize:13, color:C.sub}}>Nothing scheduled today.</span>}
+          {events.map((ev, i)=>(
+            <div key={ev.id ?? i} style={{display:"flex", gap:10, padding:"6px 0", alignItems:"center", minWidth:0}}>
+              <span style={{color:C.accent, fontWeight:800, minWidth:54, fontSize:13, flexShrink:0}}>{fmtEventTime(ev.time)}</span>
+              <span style={{fontSize:14, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{ev.title}</span>
             </div>
           ))}
         </div>
       </Tile>
     ),
     garage: (
-      <Tile title="Garage" edit={edit} onToggleVisible={()=>setVisible("garage",false)}>
+      <Tile title="Garage" edit={edit} onToggleVisible={()=>setVisible("garage",false)} fit>
         {edit ? (
           <div style={{display:"flex", flexDirection:"column", gap:8, fontSize:11, color:C.sub}}>
             <label>Opener (relay or cover)
@@ -1008,21 +1131,30 @@ export default function WallPanel() {
                 {(garagePulsing || garageDoor.moving) && " · Moving…"}
               </div>
             </div>
-            <button onClick={()=>triggerGarage()} disabled={!garageCfg.relay || garagePulsing}
+            {(() => {
+              const busyG = garagePulsing || garageDoor.moving;
+              return (
+            <button onClick={()=>triggerGarage()} disabled={!garageCfg.relay || busyG}
               style={{ flexShrink:0, minWidth:96, padding:"12px 16px", borderRadius:12, fontSize:14, fontWeight:800,
-                cursor: !garageCfg.relay || garagePulsing ? "default" : "pointer",
-                opacity: !garageCfg.relay ? 0.45 : garagePulsing ? 0.6 : 1,
-                background: garageDoor.state === "open" ? C.accent : C.cardHi,
-                color: garageDoor.state === "open" ? "#0c0e13" : C.text,
-                border: `1px solid ${garageDoor.state === "open" ? C.accent : C.edge}` }}>
-              {!garageCfg.relay ? "No relay" : garageDoor.state === "open" ? "Close" : garageDoor.state === "closed" ? "Open" : "Trigger"}
+                cursor: !garageCfg.relay || busyG ? "default" : "pointer",
+                opacity: !garageCfg.relay ? 0.45 : 1,
+                background: busyG ? C.cardHi : garageDoor.state === "open" ? C.accent : C.cardHi,
+                color: busyG ? C.sub : garageDoor.state === "open" ? "#0c0e13" : C.text,
+                border: `1px solid ${busyG ? C.accent : garageDoor.state === "open" ? C.accent : C.edge}`,
+                animation: busyG ? "fkbusy 1.1s ease-in-out infinite" : "none",
+                transform:"scale(1)", transition:"transform .1s" }}
+              onPointerDown={(e)=>{ if(garageCfg.relay && !busyG) e.currentTarget.style.transform="scale(0.93)"; }}
+              onPointerUp={(e)=>{ e.currentTarget.style.transform="scale(1)"; }}>
+              {!garageCfg.relay ? "No relay" : busyG ? "Working…" : garageDoor.state === "open" ? "Close" : garageDoor.state === "closed" ? "Open" : "Trigger"}
             </button>
+              );
+            })()}
           </div>
         )}
       </Tile>
     ),
     lock: (
-      <Tile title="Locks" edit={edit} onToggleVisible={()=>setVisible("lock",false)}>
+      <Tile title="Locks" edit={edit} onToggleVisible={()=>setVisible("lock",false)} fit>
         <div style={{display:"flex", flexDirection:"column", gap:10, justifyContent:"center", height:"100%"}}>
           {locks.length === 0 && <span style={{fontSize:12, color:C.sub}}>No locks paired.</span>}
           {locks.map((l)=>{
@@ -1043,14 +1175,24 @@ export default function WallPanel() {
                     {l.battery != null && ` · ${l.battery}%`}
                   </div>
                 </div>
-                <button onClick={()=>!edit && lockAction(l)} disabled={inMotion}
+                {(() => {
+                  const pending = !!pendingActs[l.entity_id] || inMotion;
+                  return (
+                <button onClick={()=>{ if (edit || pending) return; markPending(l.entity_id, l.state); lockAction(l); }}
+                  disabled={pending}
                   style={{ flexShrink:0, minWidth:96, padding:"12px 16px", borderRadius:12, fontSize:14, fontWeight:800,
-                    cursor: edit||inMotion ? "default" : "pointer", opacity: inMotion ? 0.6 : 1,
-                    background: locked ? C.cardHi : C.accent,
-                    color: locked ? C.text : "#0c0e13",
-                    border: `1px solid ${locked ? C.edge : C.accent}` }}>
-                  {locked ? "Unlock" : "Lock"}
+                    cursor: edit||pending ? "default" : "pointer",
+                    background: pending ? C.cardHi : locked ? C.cardHi : C.accent,
+                    color: pending ? C.sub : locked ? C.text : "#0c0e13",
+                    border: `1px solid ${pending ? C.accent : locked ? C.edge : C.accent}`,
+                    animation: pending ? "fkbusy 1.1s ease-in-out infinite" : "none",
+                    transform: "scale(1)", transition:"transform .1s" }}
+                  onPointerDown={(e)=>{ if(!edit && !pending) e.currentTarget.style.transform="scale(0.93)"; }}
+                  onPointerUp={(e)=>{ e.currentTarget.style.transform="scale(1)"; }}>
+                  {pending ? "Working…" : locked ? "Unlock" : "Lock"}
                 </button>
+                  );
+                })()}
               </div>
             );
           })}
@@ -1224,6 +1366,7 @@ export default function WallPanel() {
 
       {showRadar && <LiveRadar onClose={()=>setShowRadar(false)}/>}
       <BottomTabs/>
+      <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>
   );
 }

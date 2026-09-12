@@ -10,8 +10,7 @@ import AlarmControl from "@/components/AlarmControl";
 import {
   PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
   planFromGrid, gridFromPlan, gridRect,
-  buildPlanFloor, makeTextSprite, defaultLabels, fetchBoardState,
-} from "@/lib/planScene";
+  buildPlanFloor, makeTextSprite, defaultLabels, fetchBoardState, snapToWall } from "@/lib/planScene";
 
 /* ------------------------------------------------------------------ *
  * Security Board — isometric 2.5D, live.
@@ -84,7 +83,10 @@ function liveFor(type, entity) {
   if (type === "light") state = on ? "lit" : "dark";
   else if (type === "motion") state = on ? "motion" : "secure";
   else if (type === "smoke") state = on ? "triggered" : "secure";
-  else state = on ? "open" : "secure";
+  else {
+    const openish = on || entity.state === "open" || entity.state === "unlocked";
+    state = openish ? "open" : "secure";
+  }
   const battery = typeof entity.attributes?.battery === "number" ? entity.attributes.battery : 100;
   return { state, battery, lastChanged: entity.last_changed };
 }
@@ -123,7 +125,7 @@ function useIsNarrow(bp = 760) {
 // labels: [{id, text, floor, x, z}] — draggable in edit mode, dbl-tap to
 // rename. view: {zoom, tx, tz} initial camera state. onView fires
 // (debounced upstream) so zoom/pan persist per panel.
-function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow, themeTick }) {
+function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow, themeTick, deviceIcons }) {
   const mountRef = useRef();
   const zoomApi = useRef(null);
 
@@ -214,35 +216,77 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     const floorShiftX = (f) => (f === 1 ? SIDE_OFFSET : 0);
 
     const markerMeshes = [];
+    // grid units per plan px (for sizing wall elements)
+    const _g0 = gridFromPlan(0, 0), _g1 = gridFromPlan(100, 0);
+    const paneScale = Math.abs(_g1.x - _g0.x) / 100;
     sensors.forEach(s => {
       const y = 0.5;
       const grp = new THREE.Group();
-      grp.position.set(s.x + floorShiftX(s.floor), y, s.z);
       const isLight = s.type === "light";
+      const isContact = s.type === "contact";
+      // Contacts are wall elements, not pins: snap onto the nearest wall and
+      // inherit its orientation. Stored coords stay raw; only display snaps.
+      let gx = s.x, gz = s.z, horiz = true;
+      const planFor = s.floor === 0 ? plan : plan2;
+      if (isContact && planFor) {
+        const pp = planFromGrid(s.x, s.z);
+        const sn = snapToWall(planFor, pp.px, pp.py);
+        if (sn) { const g2 = gridFromPlan(sn.px, sn.py); gx = g2.x; gz = g2.y; horiz = sn.horiz; }
+      }
+      grp.position.set(gx + floorShiftX(s.floor), y, gz);
       const rad = (narrow ? 0.30 : 0.22) * (isLight ? 0.8 : 1);
+      const iconStyle = isLight ? (deviceIcons?.[baseEntity(s.entity_id)] ?? "ceiling") : null;
 
-      const drop = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.015,0.015,0.5,6),
-        new THREE.MeshBasicMaterial({ color:hx(C.secure), transparent:true, opacity: isLight ? 0.0 : 0.5 })
-      );
-      drop.position.y = -0.25; grp.add(drop);
-
-      let sphere, bulb = null;
-      if (isLight) {
-        // sconce: downward cone shade + bulb that lights when on
+      let sphere, bulb = null, glow = null;
+      if (isContact) {
+        // door/window element set into the wall: green closed / red open
+        const L = Math.max(0.5, 46 * paneScale);
+        const isWin = s.dc === "window";
         sphere = new THREE.Mesh(
-          new THREE.ConeGeometry(rad, rad*1.2, 20),
-          new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.4 })
+          new THREE.BoxGeometry(horiz ? L : 0.12, isWin ? 0.5 : 0.8, horiz ? 0.12 : L),
+          new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5,
+            transparent:true, opacity:0.92, roughness:0.35 })
         );
-        sphere.rotation.x = Math.PI;
-        bulb = new THREE.Mesh(
-          new THREE.SphereGeometry(rad*0.4, 12, 12),
-          new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 })
-        );
-        bulb.position.y = -rad*0.75; grp.add(bulb);
+        sphere.position.y = isWin ? 0.12 : 0;
+      } else if (isLight) {
+        if (iconStyle === "sconce") {
+          // wall sconce: small body + downward bulb, tighter glow
+          sphere = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, 0.2, 0.16),
+            new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.45 })
+          );
+          bulb = new THREE.Mesh(
+            new THREE.SphereGeometry(rad*0.35, 12, 12),
+            new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 })
+          );
+          bulb.position.y = -0.2; grp.add(bulb);
+          glow = new THREE.Mesh(
+            new THREE.CircleGeometry(0.45, 32),
+            new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false })
+          );
+        } else {
+          // ceiling light: pendant cone shade + bulb + wide floor pool
+          sphere = new THREE.Mesh(
+            new THREE.ConeGeometry(rad, rad*1.2, 20),
+            new THREE.MeshStandardMaterial({ color:hx("#525a6e"), emissive:hx("#525a6e"), emissiveIntensity:0.4, roughness:0.4 })
+          );
+          sphere.rotation.x = Math.PI;
+          bulb = new THREE.Mesh(
+            new THREE.SphereGeometry(rad*0.4, 12, 12),
+            new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0 })
+          );
+          bulb.position.y = -rad*0.75; grp.add(bulb);
+          glow = new THREE.Mesh(
+            new THREE.CircleGeometry(0.85, 40),
+            new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false })
+          );
+        }
+        glow.rotation.x = -Math.PI/2; glow.position.y = -0.485;
+        grp.add(glow);
       } else {
+        // motion / leak / smoke: small floating diamond, no pin line
         sphere = new THREE.Mesh(
-          new THREE.SphereGeometry(rad, 20, 20),
+          new THREE.OctahedronGeometry(rad*0.7),
           new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 })
         );
       }
@@ -256,19 +300,8 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       ring.rotation.x = -Math.PI/2; ring.position.y = -0.22; ring.visible = false;
       grp.add(ring);
 
-      // light pool: a soft glow disc on the floor plane, shown when lit
-      let glow = null;
-      if (isLight) {
-        glow = new THREE.Mesh(
-          new THREE.CircleGeometry(0.85, 40),
-          new THREE.MeshBasicMaterial({ color:hx(C.motion), transparent:true, opacity:0.0, depthWrite:false })
-        );
-        glow.rotation.x = -Math.PI/2; glow.position.y = -0.485;
-        grp.add(glow);
-      }
-
       scene.add(grp);
-      markerMeshes.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sphere, drop, ring, glow, bulb });
+      markerMeshes.push({ id:s.entity_id, floor:s.floor, type:s.type, grp, sphere, drop:null, ring, glow, bulb });
     });
 
     // plan features (doors / windows / garage door) with entity bindings
@@ -477,7 +510,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         m.sphere.material.color.copy(col);
         m.sphere.material.emissive.copy(col);
         m.sphere.material.emissiveIntensity = alert ? 1.4 : edit ? 0.9 : 0.5;
-        m.drop.material.color.copy(col);
+        if (m.drop) m.drop.material.color.copy(col);
 
         const pulse = alert ? 1 + Math.sin(t*4)*0.18 : edit ? 1 + Math.sin(t*2)*0.06 : 1;
         m.sphere.scale.setScalar(pulse);
@@ -547,7 +580,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       renderer.dispose();
       if (renderer.domElement.parentNode) mount.removeChild(renderer.domElement);
     };
-  }, [floorView, narrow, sensors, plan, plan2, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView, themeTick]);
+  }, [floorView, narrow, sensors, plan, plan2, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView, themeTick, deviceIcons]);
 
   const zbtn = {
     width: 40, height: 40, display: "grid", placeItems: "center",
@@ -578,7 +611,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
 // sensor_placements. Ground-floor placements only (floor 0); the plan
 // is the first floor.
 // ------------------------------------------------------------------
-function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt, plan }) {
+function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt, plan, icons }) {
   const svgRef = useRef();
   const dragging = useRef(null);
 
@@ -711,18 +744,22 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
         )}
 
         {sensors.filter(s => s.floor === 0).map(s => {
-          const { px, py } = planFromGrid(s.x, s.z);
+          const raw = planFromGrid(s.x, s.z);
+          const sn = s.type === "contact" && plan ? snapToWall(plan, raw.px, raw.py) : null;
+          const px = sn?.px ?? raw.px, py = sn?.py ?? raw.py;
+          const horiz = sn?.horiz ?? true;
           const live = liveState[s.entity_id];
           const col = colorFor(s.type, live, armed);
           const alert = col === C.open;
           const isSel = selected === s.entity_id;
           const lit = s.type === "light" && live?.state === "lit";
+          const style = s.type === "light" ? (icons?.[s.entity_id.replace(/#\d+$/, "")] ?? "ceiling") : null;
           return (
             <g key={s.entity_id}
                style={{ cursor: edit ? "grab" : "pointer" }}
                onPointerDown={(e)=>onDown(e, s.entity_id)}>
               {lit && (
-                <circle cx={px} cy={py} r={34} fill={col} opacity={0.16}>
+                <circle cx={px} cy={py} r={style === "sconce" ? 22 : 34} fill={col} opacity={0.16}>
                   <animate attributeName="opacity" values="0.12;0.2;0.12" dur="2.6s" repeatCount="indefinite"/>
                 </circle>
               )}
@@ -731,20 +768,47 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
                   {alert && <animate attributeName="r" values="18;26;18" dur="1.4s" repeatCount="indefinite"/>}
                 </circle>
               )}
-              {s.type === "light" ? (
+              {s.type === "contact" ? (
+                s.dc === "window" ? (
+                  // window: triple-line architectural break, green closed / red open
+                  horiz
+                    ? <g>{[-4,0,4].map((o,i)=><line key={i} x1={px-23} y1={py+o} x2={px+23} y2={py+o} stroke={col} strokeWidth={i===1?3:1.6}/>)}
+                        <rect x={px-23} y={py-6} width={46} height={12} fill="transparent"/></g>
+                    : <g>{[-4,0,4].map((o,i)=><line key={i} x1={px+o} y1={py-23} x2={px+o} y2={py+23} stroke={col} strokeWidth={i===1?3:1.6}/>)}
+                        <rect x={px-6} y={py-23} width={12} height={46} fill="transparent"/></g>
+                ) : (
+                  // door/lock: solid bar set into the wall
+                  horiz
+                    ? <line x1={px-23} y1={py} x2={px+23} y2={py} stroke={col} strokeWidth={7} strokeLinecap="round"/>
+                    : <line x1={px} y1={py-23} x2={px} y2={py+23} stroke={col} strokeWidth={7} strokeLinecap="round"/>
+                )
+              ) : s.type === "light" ? (
+                style === "sconce" ? (
+                  <g>
+                    <path d={`M ${px-8} ${py-2} A 8 8 0 0 1 ${px+8} ${py-2} L ${px+5} ${py-2} A 5 5 0 0 0 ${px-5} ${py-2} Z`}
+                          fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 1.5 : 0}/>
+                    <rect x={px-1.2} y={py-12} width={2.4} height={5} rx={1.2} fill={col} opacity={0.8}/>
+                    <circle cx={px} cy={py+3} r={lit ? 4.5 : 3} fill={lit ? col : "#39404f"}/>
+                  </g>
+                ) : (
+                  <g>
+                    {/* ceiling light symbol: bulb circle + radiating ticks */}
+                    <circle cx={px} cy={py} r={6.5} fill={lit ? col : "#39404f"} stroke={isSel ? C.text : col} strokeWidth={isSel ? 2 : 1.2}/>
+                    {[0,45,90,135,180,225,270,315].map(a=>{
+                      const r1=9, r2=lit?14:11, rad=a*Math.PI/180;
+                      return <line key={a} x1={px+r1*Math.cos(rad)} y1={py+r1*Math.sin(rad)} x2={px+r2*Math.cos(rad)} y2={py+r2*Math.sin(rad)} stroke={col} strokeWidth={1.6} opacity={lit?0.9:0.5}/>;
+                    })}
+                  </g>
+                )
+              ) : (
+                // motion / leak / smoke: small diamond
                 <g>
-                  {/* sconce: shade + stem + bulb */}
-                  <path d={`M ${px-8} ${py-2} A 8 8 0 0 1 ${px+8} ${py-2} L ${px+5} ${py-2} A 5 5 0 0 0 ${px-5} ${py-2} Z`}
-                        fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 1.5 : 0}/>
-                  <rect x={px-1.2} y={py-12} width={2.4} height={5} rx={1.2} fill={col} opacity={0.8}/>
-                  <circle cx={px} cy={py+3} r={lit ? 4.5 : 3} fill={lit ? col : "#39404f"}/>
+                  <polygon points={`${px},${py-9} ${px+9},${py} ${px},${py+9} ${px-9},${py}`}
+                    fill={col} opacity={0.9} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 2 : 0}/>
                 </g>
-              ) : (<>
-                <circle cx={px} cy={py} r={12} fill={col} opacity={0.25}/>
-                <circle cx={px} cy={py} r={7} fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 2 : 0}/>
-              </>)}
+              )}
               {(edit || isSel) && (
-                <text x={px} y={py - 16} fill={C.text} fontSize="14" textAnchor="middle"
+                <text x={px} y={py - 20} fill={C.text} fontSize="14" textAnchor="middle"
                       style={{ paintOrder:"stroke", stroke:"#000", strokeWidth:3, pointerEvents:"none" }}>
                   {s.label}
                 </text>
@@ -816,6 +880,16 @@ export default function SecurityBoard() {
   // pipeline). null -> ThreeScene falls back to generic geometry per floor.
   const [plan, setPlan] = useState(null);
   const [plan2, setPlan2] = useState(null);
+  // shared device display config: per-light icon style (ceiling | sconce)
+  const [deviceCfg, setDeviceCfg] = useState({ hidden: [], icons: {} });
+  useEffect(() => {
+    let dead = false;
+    fetch(`${API_URL}/api/device-config`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!dead && d) setDeviceCfg(d); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, []);
   useEffect(() => {
     let cancelled = false;
     fetch(PLAN_JSON_URL)
@@ -1006,6 +1080,7 @@ export default function SecurityBoard() {
         x: p.x,
         z: p.y, // placement y == plan depth == scene z
         type: typeFor(e),
+        dc: String(e?.attributes?.device_class ?? ""),
         label: labelFor(e, p) + (fix ? ` · ${fix[1]}` : ""),
         room: p.room,
       };
@@ -1197,14 +1272,14 @@ export default function SecurityBoard() {
     </div>
   ) : viewMode === "plan" ? (
     <FloorPlan2D
-      sensors={sensors} liveState={liveState} armed={armed} plan={resolvedPlan}
+      sensors={sensors} liveState={liveState} armed={armed} plan={resolvedPlan} icons={deviceCfg.icons}
       selected={selected} edit={edit} onPick={setSelected} onMoved={onMoved}
       pendingPlace={pendingPlace}
       onPlaceAt={(sensor, x, y) => { placeSensor(sensor.entity_id, x, y, 0); setPendingPlace(null); }}
     />
   ) : (
     <ThreeScene
-      sensors={sensors} plan={resolvedPlan} plan2={plan2} labels={labels} view={boardState.view}
+      sensors={sensors} plan={resolvedPlan} plan2={plan2} labels={labels} deviceIcons={deviceCfg.icons} view={boardState.view}
       liveStateRef={liveStateRef} armedRef={armedRef} selectedRef={selectedRef} editRef={editRef}
       floorView={floorView} onPick={setSelected} onMoved={onMoved}
       onLabelMoved={onLabelMoved} onLabelRename={onLabelRename} onView={onView} narrow={narrow}

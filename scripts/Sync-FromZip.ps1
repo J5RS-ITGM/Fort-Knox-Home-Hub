@@ -36,12 +36,30 @@ if (-not (Test-Path $Zip)) { throw "Zip not found: $Zip" }
 if (-not (Test-Path (Join-Path $Repo ".git"))) { throw "Not a git repo: $Repo" }
 
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("homehub_" + [guid]::NewGuid().ToString("N"))
-Expand-Archive -Path $Zip -DestinationPath $Tmp -Force
+try {
+  Expand-Archive -Path $Zip -DestinationPath $Tmp -Force -ErrorAction Stop
+} catch {
+  Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
+  throw "Zip extraction failed ($($_.Exception.Message)). Close any window previewing the zip and retry. Repo untouched."
+}
 
 # Zip root may be the files directly, or wrapped in a single homehub/ folder.
 $Src = $Tmp
 if ((Test-Path (Join-Path $Tmp "homehub")) -and -not (Test-Path (Join-Path $Tmp "backend"))) {
   $Src = Join-Path $Tmp "homehub"
+}
+
+# GUARDS - never mirror unless the extracted tree looks like this project.
+# A failed/partial extraction mirrored over the repo deletes everything
+# (robocopy /MIR makes the repo match the source, empty or not).
+if (-not (Test-Path (Join-Path $Src "backend")) -or -not (Test-Path (Join-Path $Src "frontend"))) {
+  Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
+  throw "Extracted zip is missing backend/ or frontend/ - extraction failed or wrong zip. Aborting before mirror; repo untouched."
+}
+# Refuse zips that also smuggle backend internals at the zip root (bad packaging).
+if ((Test-Path (Join-Path $Src "app")) -or (Test-Path (Join-Path $Src "alembic"))) {
+  Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
+  throw "Zip has backend files at its root (bad packaging) - refusing to mirror. Repo untouched."
 }
 
 robocopy $Src $Repo /MIR `

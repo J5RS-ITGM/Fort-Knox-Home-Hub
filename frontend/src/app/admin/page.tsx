@@ -228,7 +228,10 @@ function DevicesTab({ placements, entities, busy, act }: { placements: Placement
   return (
     <section>
       <h2 className={sectionTitle}>Sensor placements <span className="normal-case tracking-normal">(drag mode also available on the Security board)</span></h2>
-      <div className="mb-3">
+      <div className="mb-3 flex items-center gap-2">
+        <a href="/devices" className="rounded-md bg-lamp px-3 py-2 text-xs font-semibold text-field transition-opacity hover:opacity-90">
+          Open Devices Manager →
+        </a>
         <a href={`${API_URL}/api/export/sensors.xlsx`} className={btn} download>
           Export sensors (.xlsx)
         </a>

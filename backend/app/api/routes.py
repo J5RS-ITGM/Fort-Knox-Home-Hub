@@ -326,6 +326,44 @@ async def delete_placement(entity_id: str, session: AsyncSession = Depends(get_s
 
 
 # -- panel layouts -----------------------------------------------------------
+import json as _json
+
+DEVICE_CFG_KEY = "panel_devices"
+
+@protected.get("/device-config")
+async def get_device_config(session: AsyncSession = Depends(get_session)) -> dict:
+    """Shared display config for HA devices: which entities are hidden from
+    the wall panel's Devices tile, and per-light icon style
+    ("ceiling" | "sconce"). One record for the whole household so every
+    panel and phone agrees."""
+    row = (await session.execute(
+        select(models.AppSetting).where(models.AppSetting.key == DEVICE_CFG_KEY)
+    )).scalar_one_or_none()
+    if not row or not row.value:
+        return {"hidden": [], "icons": {}}
+    try:
+        data = _json.loads(row.value)
+    except ValueError:
+        return {"hidden": [], "icons": {}}
+    return {"hidden": data.get("hidden", []), "icons": data.get("icons", {})}
+
+
+@protected.put("/device-config")
+async def put_device_config(body: dict, session: AsyncSession = Depends(get_session)) -> dict:
+    hidden = [str(x) for x in body.get("hidden", [])][:500]
+    icons = {str(k): (v if v in ("ceiling", "sconce") else "ceiling")
+             for k, v in dict(body.get("icons", {})).items()}
+    row = (await session.execute(
+        select(models.AppSetting).where(models.AppSetting.key == DEVICE_CFG_KEY)
+    )).scalar_one_or_none()
+    if row is None:
+        row = models.AppSetting(key=DEVICE_CFG_KEY)
+        session.add(row)
+    row.value = _json.dumps({"hidden": hidden, "icons": icons})
+    await session.commit()
+    return {"hidden": hidden, "icons": icons}
+
+
 @protected.get("/layouts/{panel_key}", response_model=LayoutOut)
 async def get_layout(panel_key: str, session: AsyncSession = Depends(get_session)) -> models.PanelLayout:
     result = await session.execute(
