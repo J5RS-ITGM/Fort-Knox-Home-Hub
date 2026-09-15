@@ -295,6 +295,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         shackle.position.y = 0.08;
         sphere.add(shackle);
         sphere.position.y = 0.35; // floats just above the door element
+        if (!horiz) sphere.rotation.y = Math.PI / 2; // face out from N-S walls
       } else {
         // motion / leak / smoke: small floating diamond, no pin line
         sphere = new THREE.Mesh(

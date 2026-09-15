@@ -11,6 +11,7 @@ import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardSta
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
+import PanelNav from "@/components/PanelNav";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 /* ------------------------------------------------------------------ *
@@ -213,6 +214,7 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
         const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.022, 10, 16, Math.PI), mat);
         shackle.position.y = 0.08; sph.add(shackle);
         sph.position.y = 0.35;
+        if (!horiz) sph.rotation.y = Math.PI / 2; // face out from N-S walls
         grp.add(sph);
         ring = new THREE.Mesh(new THREE.RingGeometry(0.28,0.38,32), new THREE.MeshBasicMaterial({ color:hx(C.open), transparent:true, opacity:0.55, side:THREE.DoubleSide }));
         ring.rotation.x=-Math.PI/2; ring.position.y=-0.5; ring.visible=false; grp.add(ring);
@@ -509,7 +511,7 @@ const SCENES = [ ["Morning",Sun], ["Movie",Play], ["Away",Lock], ["Night",Moon] 
 const FORECAST = [ ["Now","72°",Sun], ["1p","75°",Sun], ["2p","76°",Sun], ["3p","74°",Cloud], ["4p","71°",Cloud], ["5p","68°",Droplets] ];
 
 // ================= CLOCK =====================
-function ClockStrip() {
+function ClockStrip({ extra }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -525,6 +527,7 @@ function ClockStrip() {
       <span style={{ fontSize:34, fontWeight:800, color:C.text, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{time}</span>
       <span style={{ fontSize:15, fontWeight:700, color:C.subDim, fontVariantNumeric:"tabular-nums" }}>:{secs}</span>
       <span style={{ fontSize:16, fontWeight:600, color:C.sub }}>{date}</span>
+      {extra}
     </div>
   );
 }
@@ -536,17 +539,17 @@ const GRID_COLS = 12;
 // left half; radar is hidden by default (the Weather tile has a radar
 // button). Each tile: desktop slot (x,y,w,h), visibility, and `m` = mobile
 // stack order.
-const LAYOUT_V = 3;
+const LAYOUT_V = 4;
 const DEFAULT_LAYOUT = {
   clock:   { x:0, y:0, w:12, h:1, visible:true, m:0, _v:LAYOUT_V },
   board:   { x:0, y:1, w:6, h:6, visible:true, m:3 },
-  weather: { x:6, y:1, w:6, h:1, visible:true, m:4 },
-  climate: { x:6, y:2, w:3, h:1, visible:true, m:6 },
-  calendar:{ x:9, y:2, w:3, h:2, visible:true, m:7 },
-  lock:    { x:6, y:3, w:3, h:1, visible:true, m:1 },
-  garage:  { x:6, y:4, w:3, h:1, visible:true, m:2 },
-  tasks:   { x:9, y:4, w:3, h:3, visible:true, m:8 },
-  devices: { x:6, y:5, w:3, h:2, visible:true, m:5 },
+  climate: { x:6, y:1, w:3, h:1, visible:true, m:6 },
+  calendar:{ x:9, y:1, w:3, h:2, visible:true, m:7 },
+  lock:    { x:6, y:2, w:3, h:1, visible:true, m:1 },
+  garage:  { x:6, y:3, w:3, h:1, visible:true, m:2 },
+  devices: { x:6, y:4, w:3, h:3, visible:true, m:5 },
+  tasks:   { x:9, y:3, w:3, h:4, visible:true, m:8 },
+  weather: { x:6, y:1, w:6, h:1, visible:false, m:4 },
   radar:   { x:9, y:1, w:3, h:2, visible:false, m:9 },
 };
 const TILE_META = {
@@ -664,22 +667,35 @@ export default function WallPanel() {
   // Locks tile: every lock entity + its Z-Wave JS companion door sensor
   // (<lock_name>_current_status_of_the_door, binary_sensor or sensor).
   const locks = useMemo(() => {
+    // Door state comes from the nearest PLACED door contact on the board
+    // (within ~70 plan px of the lock's own placement). The lock's built-in
+    // "_current_status_of_the_door" field is phantom data on BE469s - no
+    // door-sensing hardware - so it is deliberately ignored.
+    const doorNear = (lockId) => {
+      const lp = placements?.find(p => baseEntity(p.entity_id) === lockId);
+      if (!lp) return null;
+      const a = planFromGrid(lp.x, lp.y);
+      let best = null, bestD = 70;
+      for (const p of placements ?? []) {
+        const e = entities.get(baseEntity(p.entity_id));
+        if (!e || typeOf(e) !== "contact") continue;
+        const b = planFromGrid(p.x, p.y);
+        const d = Math.hypot(a.px - b.px, a.py - b.py);
+        if (d < bestD) { best = e; bestD = d; }
+      }
+      if (!best || best.state === "unavailable" || best.state === "unknown") return null;
+      return best.state === "on" || best.state === "open" ? "Open" : "Closed";
+    };
     const list = [];
     for (const e of entities.values()) {
       if (e.domain !== "lock") continue;
-      const n = e.entity_id.split(".")[1];
-      const ds = entities.get(`binary_sensor.${n}_current_status_of_the_door`)
-              ?? entities.get(`sensor.${n}_current_status_of_the_door`);
-      const door = !ds || ds.state === "unavailable" || ds.state === "unknown" ? null
-        : (ds.state === "on" || ds.state === "open") ? "Open"
-        : (ds.state === "off" || ds.state === "closed") ? "Closed" : ds.state;
-      list.push({ entity_id: e.entity_id, name: e.friendly_name, state: e.state, door,
+      list.push({ entity_id: e.entity_id, name: e.friendly_name, state: e.state, door: doorNear(e.entity_id),
                   battery: e.attributes?.battery });
     }
     const ord = deviceCfg.order ?? {};
     list.sort((a, b) => ((ord[a.entity_id] ?? 999) - (ord[b.entity_id] ?? 999)) || a.name.localeCompare(b.name));
     return list;
-  }, [entities, deviceCfg.order]);
+  }, [entities, deviceCfg.order, placements]);
 
   // devices tile from live light/switch domains (+ sump monitor). Locks
   // live in their own tile now — keep them out so nothing shows twice.
@@ -971,7 +987,9 @@ export default function WallPanel() {
   // move an entity one step among its siblings and persist the whole
   // sibling order so gaps/ties can't accumulate
   const moveWithin = (list, id, dir) => {
-    const ids = [...list].sort((a, b) => orderOf(a) - orderOf(b) || a.localeCompare(b));
+    // `list` arrives in the exact order the tile displays - do NOT re-sort,
+    // or the swap targets the wrong neighbor (the "doesn't rearrange" bug)
+    const ids = [...list];
     const i = ids.indexOf(id); const j = i + dir;
     if (i < 0 || j < 0 || j >= ids.length) return;
     [ids[i], ids[j]] = [ids[j], ids[i]];
@@ -1033,6 +1051,10 @@ export default function WallPanel() {
   // ---- grid geometry ----
   const gridRef = useRef();
   const camSaveRef = useRef(null);
+  // Panel text size: zoom applied to the tile areas; persists with layout
+  const textScale = layout.clock?.textScale ?? 1;
+  const bumpText = (d) => setLayout(prev => ({ ...prev,
+    clock: { ...prev.clock, textScale: Math.min(1.3, Math.max(0.85, +(((prev.clock?.textScale ?? 1) + d)).toFixed(2))) } }));
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
@@ -1106,7 +1128,30 @@ export default function WallPanel() {
   const tileContent = {
     clock: (
       <div style={{ position:"relative" }}>
-        <ClockStrip/>
+        <ClockStrip extra={
+          <div style={{display:"flex", alignItems:"center", gap:12, marginLeft:"auto", minWidth:0}}>
+            <Sun size={22} color={C.motion} style={{flexShrink:0}}/>
+            <span style={{fontSize:22, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
+            {!isMobile && <span style={{fontSize:12, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>}
+            {!isMobile && (
+              <div style={{display:"flex", gap:11, overflow:"hidden"}}>
+                {FORECAST.map(([t,tp,Ic],i)=>(
+                  <div key={i} style={{display:"flex", alignItems:"center", gap:3, flexShrink:0}}>
+                    <span style={{fontSize:10, color:C.sub}}>{t}</span>
+                    <Ic size={12} color={i>3?C.sub:C.motion}/>
+                    <span style={{fontSize:12, fontWeight:700}}>{tp}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
+              style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0,
+                background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
+                padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+              <Radar size={13}/>{!isMobile ? " Radar" : ""}
+            </button>
+          </div>
+        }/>
         {edit && <button onClick={()=>setVisible("clock",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer", zIndex:2}}><EyeOff size={15}/></button>}
       </div>
     ),
@@ -1340,7 +1385,7 @@ export default function WallPanel() {
             <Eye size={12}/>{devicePick ? "Done" : "Show / hide"}
           </button>
         )}
-        <div style={{display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: isMobile ? 9 : 7, marginBottom:8}}>
+        <div style={{display:"grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 9, marginBottom:8}}>
           {devices.filter(d => (edit || devicePick) || !hiddenDevices.includes(d.entity_id)).map((d)=>{
             const hidden = hiddenDevices.includes(d.entity_id);
             const picking = edit || devicePick; // edit (desktop) / Show-hide chip (mobile)
@@ -1350,13 +1395,13 @@ export default function WallPanel() {
               style={{ display:"flex", alignItems:"center", gap:7, minWidth:0, opacity: hidden ? 0.35 : 1,
                 background: d.on&&d.kind!=="monitor"&&!hidden?"rgba(107,138,253,0.15)":C.cardHi,
                 border:`1px solid ${picking && hidden ? C.open : d.on&&d.kind!=="monitor"?C.accent:C.edge}`,
-                borderRadius:10, padding: isMobile ? "12px 11px" : "8px 9px",
+                borderRadius:10, padding: "12px 12px",
                 cursor: (d.kind==="monitor" && !picking)?"default":"pointer", color:C.text, textAlign:"left" }}>
               {picking && (hidden ? <EyeOff size={isMobile?15:13} color={C.open} style={{flexShrink:0}}/> : <Eye size={isMobile?15:13} color={C.subDim} style={{flexShrink:0}}/>)}
-              {d.kind==="light" && <Lightbulb size={isMobile?17:15} color={d.on?C.motion:C.subDim} style={{flexShrink:0}}/>}
-              {d.kind==="switch" && <Zap size={isMobile?17:15} color={d.on?C.secure:C.subDim} style={{flexShrink:0}}/>}
-              {d.kind==="monitor" && <Wifi size={isMobile?17:15} color={C.secure} style={{flexShrink:0}}/>}
-              <span style={{fontSize: isMobile?12:11, fontWeight:600, minWidth:0, flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
+              {d.kind==="light" && <Lightbulb size={17} color={d.on?C.motion:C.subDim} style={{flexShrink:0}}/>}
+              {d.kind==="switch" && <Zap size={17} color={d.on?C.secure:C.subDim} style={{flexShrink:0}}/>}
+              {d.kind==="monitor" && <Wifi size={17} color={C.secure} style={{flexShrink:0}}/>}
+              <span style={{fontSize:12.5, fontWeight:600, minWidth:0, flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
               {picking && (<span style={{display:"flex", gap:2, flexShrink:0}} onClick={(e)=>e.stopPropagation()}>
                 <span onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, -1)} style={{padding:"2px 5px", border:`1px solid ${C.edge}`, borderRadius:6, fontSize:11, cursor:"pointer", color:C.sub}}>‹</span>
                 <span onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, 1)} style={{padding:"2px 5px", border:`1px solid ${C.edge}`, borderRadius:6, fontSize:11, cursor:"pointer", color:C.sub}}>›</span>
@@ -1416,6 +1461,7 @@ export default function WallPanel() {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8,
         background:C.card, border:`1px solid ${allSecure?C.edge:C.open}`, borderRadius:16, padding: isMobile ? "10px 14px" : "12px 18px", marginBottom:12, flexShrink:0 }}>
         <div style={{display:"flex", alignItems:"center", gap:isMobile?9:14, flexWrap:"wrap"}}>
+          {!isMobile && <PanelNav inline />}
           <span style={{width:11,height:11,borderRadius:11, background: allSecure?C.secure:C.open, boxShadow:`0 0 10px ${allSecure?C.secure:C.open}`}}/>
           <span style={{fontSize:isMobile?16:20, fontWeight:800}}>{allSecure?"All Secure":`${summary.open} Open`}</span>
           <span style={{fontSize:isMobile?11:13, color:C.sub}}>
@@ -1439,13 +1485,22 @@ export default function WallPanel() {
             ⏰ {duePending.length} reminder{duePending.length===1?"":"s"}
           </button>
         )}
-        {isMobile ? (
+        {isMobile ? (<>
+          {arrange && (<>
+            <button onClick={()=>bumpText(-0.05)} aria-label="Smaller text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>A−</button>
+            <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:800, cursor:"pointer" }}>A+</button>
+          </>)}
           <button onClick={()=>setArrange(a=>!a)} aria-label="Arrange cards"
             style={{ display:"flex", alignItems:"center", gap:6, background: arrange?C.accent:C.cardHi, color: arrange?C.bg0:C.sub, border:`1px solid ${arrange?C.accent:C.edge}`, borderRadius:10, padding:"8px 11px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
             <Settings2 size={14}/>{arrange?"Done":"Arrange"}
           </button>
-        ) : (
+        </>) : (
           <div style={{display:"flex", alignItems:"center", gap:8}}>
+            {edit && (<>
+              <button onClick={()=>bumpText(-0.05)} aria-label="Smaller text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"9px 12px", fontSize:12, fontWeight:800, cursor:"pointer" }}>A−</button>
+              <span style={{fontSize:11, color:C.sub, minWidth:34, textAlign:"center"}}>{Math.round(textScale*100)}%</span>
+              <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"9px 12px", fontSize:14, fontWeight:800, cursor:"pointer" }}>A+</button>
+            </>)}
             <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
               <Settings2 size={17}/>{edit?"Done":"Edit"}
             </button>
@@ -1472,7 +1527,7 @@ export default function WallPanel() {
 
       {/* grid (desktop) / stack (mobile) — CSS decides which shows, so it
           can't be wrong regardless of how the PWA reports viewport size */}
-      <div className="panel-stack-mobile" style={{ flexDirection:"column", gap:14, paddingBottom:8, width:"100%" }}>
+      <div className="panel-stack-mobile" style={{ flexDirection:"column", gap:14, paddingBottom:8, width:"100%", zoom: textScale }}>
         {mobileIds(layout).map((id, idx, arr) => {
             const fixed = (id === "board" || id === "radar") ? 320 : null;
             return (
@@ -1495,7 +1550,8 @@ export default function WallPanel() {
           })}
       </div>
 
-      <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", minHeight:"calc(100dvh - 90px)",
+      <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", zoom: textScale,
+        minHeight:`calc((100dvh - 90px) / ${textScale})`,
         background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${unitH-1}px, rgba(107,138,253,0.06) ${unitH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
         borderRadius:12 }}>
         {Object.keys(layout).filter(id => layout[id].visible).map(id => {

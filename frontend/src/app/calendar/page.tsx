@@ -584,21 +584,21 @@ function EventEditor({ members, initial, date, onClose, onSaved }: {
 
   return (
     <div className="fixed inset-0 z-[70] grid place-items-center bg-black/80 p-4 backdrop-blur" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="mb-3 text-base font-semibold">{initial ? "Edit event" : "New event"}</h3>
         <div className="flex flex-col gap-2">
           <input className={input} placeholder="What's happening?" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} autoFocus />
-          <div className="flex gap-2">
-            <input type="date" className={`${input} flex-1`} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
-            <input type="time" className={`${input} w-28`} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
-            <input type="time" className={`${input} w-28`} value={f.end_time} onChange={(e) => setF({ ...f, end_time: e.target.value })} />
+          <div className="flex flex-wrap gap-2">
+            <input type="date" className={`${input} w-full min-w-0 sm:w-auto sm:flex-1`} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+            <input type="time" className={`${input} min-w-0 flex-1`} value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
+            <input type="time" className={`${input} min-w-0 flex-1`} value={f.end_time} onChange={(e) => setF({ ...f, end_time: e.target.value })} />
           </div>
           <div className="flex gap-2">
-            <select className={`${input} flex-1`} value={f.member_id} onChange={(e) => setF({ ...f, member_id: e.target.value })}>
+            <select className={`${input} min-w-0 flex-1`} value={f.member_id} onChange={(e) => setF({ ...f, member_id: e.target.value })}>
               <option value="">Whole family</option>
               {members.map((m) => <option key={m.id} value={m.id}>{m.emoji} {m.name}</option>)}
             </select>
-            <select className={`${input} flex-1`} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
+            <select className={`${input} min-w-0 flex-1`} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
               {CATS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
           </div>

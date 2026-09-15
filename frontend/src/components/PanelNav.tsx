@@ -16,14 +16,14 @@ const LINKS: [string, string, React.ComponentType<{ size?: number }>][] = [
   ["/security", "Security", Shield],
   ["/calendar", "Calendar", CalendarDays],
   ["/gallery", "Gallery", Images],
-  ["/chores", "Chores", ListChecks],
+  ["/chores", "Tasks", ListChecks],
   ["/todo", "To-Do", ListTodo],
   ["/control", "Control", SlidersHorizontal],
   ["/recipes", "Recipes", ChefHat],
   ["/sensors", "Sensors", Activity],
 ];
 
-export default function PanelNav() {
+export default function PanelNav({ inline = false }: { inline?: boolean }) {
   const pathname = usePathname();
   const { me, loading } = useMe();
   const [open, setOpen] = useState(false);
@@ -32,7 +32,10 @@ export default function PanelNav() {
   if (loading || isKiosk(me)) return null;
 
   return (
-    <div className="hidden sm:block" style={{ position: "fixed", top: "max(12px, env(safe-area-inset-top))", left: 12, zIndex: 45 }}>
+    <div className="hidden sm:block"
+         style={inline
+           ? { position: "relative", zIndex: 45 }
+           : { position: "fixed", top: "max(12px, env(safe-area-inset-top))", left: 12, zIndex: 45 }}>
       {!open ? (
         <button
           onClick={() => setOpen(true)}
@@ -50,6 +53,7 @@ export default function PanelNav() {
       ) : (
         <div
           style={{
+            ...(inline ? { position: "absolute", top: "calc(100% + 8px)", left: 0 } : {}),
             background: "rgba(14,17,24,0.95)", backdropFilter: "blur(10px)",
             border: "1px solid var(--color-line)", borderRadius: 12, padding: 6,
             display: "flex", flexDirection: "column", gap: 2, minWidth: 180,
