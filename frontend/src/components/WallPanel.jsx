@@ -12,7 +12,8 @@ import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardSta
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
-import TopMenu from "@/components/TopMenu";
+import AppHeader from "@/components/AppHeader";
+import { isKiosk, useMe } from "@/lib/auth";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 /* ------------------------------------------------------------------ *
@@ -586,14 +587,15 @@ function ClockStrip() {
 
 // ================= LAYOUT =====================
 const GRID_COLS = 12;
-// v5 layout: the clock and weather are two SEPARATE tiles sharing row 0 —
-// both move/resize like any other tile, and all 7 rows are the same unit
-// height, so resizing the weather tile to h:1 makes it exactly the clock
-// tile's height (that was impossible while row 0 was a special fixed
-// strip). Board keeps the full left half below them. Radar stays hidden by
+// v6 layout: the clock and weather are two SEPARATE tiles sharing row 0,
+// which is the COMPACT 72px strip (the original clock-strip height) — so
+// both sit side by side at the height Eric wanted, and either can still be
+// dragged/resized anywhere. Rows 1..6 divide the remaining viewport as
+// before. Board keeps the full left half below them. Radar stays hidden by
 // default (the Weather tile has a radar button). Each tile: desktop slot
-// (x,y,w,h), visibility, and `m` = mobile stack order.
-const LAYOUT_V = 5;
+// (x,y,w,h), visibility, `m` = mobile stack order, and optionally `hp` =
+// an exact pixel height set by content-snapped resizing (locks/devices).
+const LAYOUT_V = 6;
 const DEFAULT_LAYOUT = {
   clock:   { x:0, y:0, w:6, h:1, visible:true, m:0, _v:LAYOUT_V },
   weather: { x:6, y:0, w:6, h:1, visible:true, m:1 },
@@ -649,6 +651,10 @@ export default function WallPanel() {
 
   // ---- LIVE DATA -----------------------------------------------------------
   const { entities, linkUp, bridgeUp } = useHomeHub();
+  // Kiosk sessions show the bottom tab bar, so the grid must give that
+  // height back or the board's legend/camera-lock end up under the tabs.
+  const { me } = useMe();
+  const kiosk = isKiosk(me);
 
   // Shared device display config (hidden devices + light icon styles) -
   // one server record so the kiosk, phones, and admin page all agree.
@@ -1141,22 +1147,49 @@ export default function WallPanel() {
     const ro = new ResizeObserver(() => setGridSize({ w:el.clientWidth, h:el.clientHeight }));
     ro.observe(el); return () => ro.disconnect();
   }, []);
-  // Geometry: 7 uniform rows dividing the grid height evenly, so every
-  // h:1 tile — clock, weather, anything — is exactly the same height and
-  // the whole layout still fits the viewport with nothing below the fold.
-  const UNIT_ROWS = 7;
+  // Geometry: row 0 is the compact 72px strip (clock + weather side by
+  // side at the original strip height); rows 1..6 divide the remaining
+  // grid height evenly so the layout fits the viewport. A tile with `hp`
+  // set (content-snapped resize) renders at that exact pixel height.
+  const ROW0_H = 72;
+  const UNIT_ROWS = 6;
   const cellW = gridSize.w / GRID_COLS;
-  const unitH = Math.max(76, gridSize.h / UNIT_ROWS);
+  const unitH = Math.max(80, (gridSize.h - ROW0_H) / UNIT_ROWS);
   const GAP = 12;
-  const rowTop = (y) => y * unitH;
-  const rowSpanH = (y, h) => h * unitH;
+  const rowTop = (y) => (y === 0 ? 0 : ROW0_H + (y - 1) * unitH);
+  const rowSpanH = (y, h) => (y === 0 ? ROW0_H + Math.max(0, h - 1) * unitH : h * unitH);
+  const gridTotalH = ROW0_H + UNIT_ROWS * unitH;
 
   const tileStyle = (l) => ({
     position:"absolute",
     left: l.x*cellW + GAP/2, top: rowTop(l.y) + GAP/2,
-    width: l.w*cellW - GAP, height: rowSpanH(l.y, l.h) - GAP,
+    width: l.w*cellW - GAP,
+    height: l.hp != null ? l.hp : rowSpanH(l.y, l.h) - GAP,
     transition: dragId.current ? "none" : "left .18s, top .18s, width .18s, height .18s",
   });
+
+  // ---- content-snapped heights (locks / devices) ----
+  // Dragging the corner on these tiles snaps to WHOLE content rows —
+  // "2 locks", "3 rows of devices" — instead of arbitrary viewport
+  // fractions. Constants mirror the tiles' real row metrics (button
+  // padding + gaps + card chrome); content is centered, so ±a few px is
+  // invisible. The snapped height is stored as `hp` (exact px) alongside
+  // an approximate `h` so the mobile stack and migrations stay sane.
+  const SNAP_STEPS = {
+    lock:    { chrome: 45, rowOnce: 53, label: (n) => `${n} lock${n === 1 ? "" : "s"}` },
+    devices: { chrome: 113, rowOnce: 52, label: (n) => `${n} row${n === 1 ? "" : "s"} of devices` },
+  };
+  const snapHeight = (id, desiredPx, maxPx) => {
+    const s = SNAP_STEPS[id];
+    let best = null, bestN = 1;
+    for (let n = 1; n <= 12; n++) {
+      const px = s.chrome + n * s.rowOnce;
+      if (px > maxPx && best != null) break;
+      if (best == null || Math.abs(px - desiredPx) < Math.abs(best - desiredPx)) { best = px; bestN = n; }
+    }
+    return { px: Math.min(best ?? desiredPx, maxPx), n: bestN };
+  };
+  const [resizeHint, setResizeHint] = useState(null); // {id, label} while snapping
 
   // ---- drag + resize ----
   const dragId = useRef(null);
@@ -1167,7 +1200,8 @@ export default function WallPanel() {
     e.preventDefault(); e.stopPropagation();
     dragId.current = id; mode.current = m;
     const l = layout[id];
-    start.current = { mx:e.clientX, my:e.clientY, x:l.x, y:l.y, w:l.w, h:l.h };
+    start.current = { mx:e.clientX, my:e.clientY, x:l.x, y:l.y, w:l.w, h:l.h,
+                      ph: l.hp != null ? l.hp : rowSpanH(l.y, l.h) - GAP };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
   };
@@ -1179,16 +1213,27 @@ export default function WallPanel() {
       const l = { ...prev[id] };
       if (mode.current === "move") {
         l.x = Math.max(0, Math.min(GRID_COLS - l.w, start.current.x + dx));
-        l.y = Math.max(0, Math.min(UNIT_ROWS - l.h, start.current.y + dy));
+        l.y = Math.max(0, Math.min(1 + UNIT_ROWS - l.h, start.current.y + dy));
       } else {
         l.w = Math.max(1, Math.min(GRID_COLS - l.x, start.current.w + dx));
-        l.h = Math.max(1, Math.min(UNIT_ROWS - l.y, start.current.h + dy));
+        if (SNAP_STEPS[id]) {
+          const desired = start.current.ph + (e.clientY - start.current.my);
+          const maxPx = gridTotalH - rowTop(l.y) - GAP;
+          const snap = snapHeight(id, desired, maxPx);
+          l.hp = snap.px;
+          l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, Math.round((snap.px + GAP) / unitH)));
+          setResizeHint({ id, label: SNAP_STEPS[id].label(snap.n) });
+        } else {
+          l.hp = undefined;
+          l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, start.current.h + dy));
+        }
       }
       return { ...prev, [id]: l };
     });
   };
   const onPointerUp = () => {
     dragId.current = null; mode.current = null;
+    setResizeHint(null);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
   };
@@ -1537,13 +1582,13 @@ export default function WallPanel() {
   const hiddenTiles = Object.keys(layout).filter(id => !layout[id].visible);
 
   return (<>
-    <TopMenu />
+    <AppHeader />
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
       minHeight: "calc(100dvh - var(--fk-menu-h, 0px))",
       width: "100%", maxWidth:"100%",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       padding: "12px",
-      paddingBottom:`calc(12px + env(safe-area-inset-bottom))`,
+      paddingBottom:`calc(12px + env(safe-area-inset-bottom) + ${kiosk ? BOTTOM_TABS_HEIGHT : 0}px)`,
       boxSizing:"border-box" }}>
 
       {/* header */}
@@ -1640,7 +1685,7 @@ export default function WallPanel() {
       </div>
 
       <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", zoom: textScale,
-        minHeight:`calc((100dvh - var(--fk-menu-h, 0px) - 90px) / ${textScale})`,
+        minHeight:`calc((100dvh - var(--fk-menu-h, 0px) - 90px - ${kiosk ? BOTTOM_TABS_HEIGHT : 0}px) / ${textScale})`,
         background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${unitH-1}px, rgba(107,138,253,0.06) ${unitH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
         borderRadius:12 }}>
         {Object.keys(layout).filter(id => layout[id].visible).map(id => {
@@ -1652,6 +1697,12 @@ export default function WallPanel() {
                 style={{ height:"100%", cursor: edit?"grab":"default", position:"relative",
                   outline: edit ? `1.5px dashed ${C.accent}` : "none", outlineOffset:2, borderRadius:16 }}>
                 {tileContent[id]}
+                {edit && resizeHint?.id === id && (
+                  <div style={{ position:"absolute", right:8, bottom:30, background:C.accent, color:"#0c0e13",
+                    borderRadius:8, padding:"4px 10px", fontSize:12, fontWeight:800, whiteSpace:"nowrap", zIndex:6 }}>
+                    {resizeHint.label}
+                  </div>
+                )}
                 {edit && (
                   <div onPointerDown={(e)=>onPointerDown(e, id, "resize")} style={{ position:"absolute", right:0, bottom:0, width:26, height:26, cursor:"nwse-resize", display:"grid", placeItems:"center" }}>
                     <div style={{ width:12, height:12, borderRight:`2.5px solid ${C.accent}`, borderBottom:`2.5px solid ${C.accent}`, borderBottomRightRadius:3 }}/>

@@ -7,7 +7,7 @@ import { useHomeHub } from "@/lib/useHomeHub";
 import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
-import TopMenu from "@/components/TopMenu";
+import AppHeader from "@/components/AppHeader";
 import {
   PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
   planFromGrid, gridFromPlan, gridRect,
@@ -1395,7 +1395,7 @@ export default function SecurityBoard() {
   // ---------------- MOBILE: stacked, scrollable ----------------
   if (narrow) {
     return (<>
-      <TopMenu />
+      <AppHeader />
       <div style={shell}>
         {header}
         <div style={{flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch"}}>
@@ -1418,7 +1418,7 @@ export default function SecurityBoard() {
 
   // ---------------- WIDE: side-by-side kitchen panel ----------------
   return (<>
-    <TopMenu />
+    <AppHeader />
     <div style={shell}>
       {header}
       <div style={{flex:1, display:"flex", minHeight:0}}>

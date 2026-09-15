@@ -6,7 +6,7 @@
  *  the nav as one equal-width pill strip (flex:1 tabs, active tab filled).
  *  Kiosk sessions get a trimmed set (no Home, Admin, or Sign out). */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { LogOut, Menu, MonitorSmartphone, Settings, X } from "lucide-react";
 import KioskGate from "@/components/KioskGate";
@@ -33,6 +33,25 @@ export default function AppHeader() {
   const { me, loading } = useMe();
   const [gate, setGate] = useState(false);
   const [menu, setMenu] = useState(false);
+  // Publish the header's REAL height (it's hidden on mobile -> 0) as a CSS
+  // var so the full-height Panel/Security shells can subtract it and keep
+  // every element on screen. Kiosk never mounts this header, so the var
+  // stays 0 there and kiosk keeps the full viewport.
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const set = () => document.documentElement.style.setProperty("--fk-menu-h", `${el.offsetHeight}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    window.addEventListener("resize", set);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", set);
+      document.documentElement.style.setProperty("--fk-menu-h", "0px");
+    };
+  }, [loading, me]);
 
   // Kiosk navigates via the bottom tab bar, not this header — both is
   // redundant. Hide until auth resolves to avoid a flash, skip for kiosk.
@@ -42,7 +61,7 @@ export default function AppHeader() {
   const nav = NAV;
 
   return (
-    <header className="sticky top-0 z-20 hidden border-b border-line bg-field/90 backdrop-blur sm:block">
+    <header ref={headerRef} className="sticky top-0 z-20 hidden border-b border-line bg-field/90 backdrop-blur sm:block">
       <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3">
         {/* Row 1 — brand · status · alarm · account */}
         <div className="flex items-center gap-2 sm:gap-4">
