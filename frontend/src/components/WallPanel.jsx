@@ -54,6 +54,7 @@ function boardStateFor(sensor, entity) {
   const on = entity.state === "on";
   let state = "secure";
   if (sensor.type === "light") state = on ? "lit" : "dark"; // lights are never "open"
+  else if (sensor.type === "lock") state = entity.state === "unlocked" || entity.state === "jammed" ? "open" : "secure";
   else if (sensor.type === "motion") state = on ? "motion" : "secure";
   else if (sensor.type === "smoke") state = on ? "triggered" : "secure";
   else {
@@ -171,8 +172,9 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
       const y = s.floor*2.4 + 0.55; const grp = new THREE.Group();
       const isLight = s.type === "light";
       const isContact = s.type === "contact";
+      const isLock = s.type === "lock";
       let gx = s.x, gz = s.y, horiz = true;
-      if (isContact && plan && s.floor === 0) {
+      if ((isContact || isLock) && plan && s.floor === 0) {
         const pp = planFromGrid(s.x, s.y);
         const sn = snapToWall(plan, pp.px, pp.py);
         if (sn) { const g2 = gridFromPlan(sn.px, sn.py); gx = g2.x; gz = g2.y; horiz = sn.horiz; }
@@ -205,6 +207,15 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
         }
         grp.add(sph);
         glow.rotation.x = -Math.PI/2; glow.position.y = -0.53; grp.add(glow);
+      } else if (isLock) {
+        const mat = new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.6, roughness:0.3 });
+        sph = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.16, 0.08), mat);
+        const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.022, 10, 16, Math.PI), mat);
+        shackle.position.y = 0.08; sph.add(shackle);
+        sph.position.y = 0.35;
+        grp.add(sph);
+        ring = new THREE.Mesh(new THREE.RingGeometry(0.28,0.38,32), new THREE.MeshBasicMaterial({ color:hx(C.open), transparent:true, opacity:0.55, side:THREE.DoubleSide }));
+        ring.rotation.x=-Math.PI/2; ring.position.y=-0.5; ring.visible=false; grp.add(ring);
       } else {
         sph = new THREE.Mesh(new THREE.OctahedronGeometry(0.17), new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.5, roughness:0.3 }));
         grp.add(sph);
@@ -525,14 +536,14 @@ const GRID_COLS = 12;
 // left half; radar is hidden by default (the Weather tile has a radar
 // button). Each tile: desktop slot (x,y,w,h), visibility, and `m` = mobile
 // stack order.
-const LAYOUT_V = 2;
+const LAYOUT_V = 3;
 const DEFAULT_LAYOUT = {
   clock:   { x:0, y:0, w:12, h:1, visible:true, m:0, _v:LAYOUT_V },
   board:   { x:0, y:1, w:6, h:6, visible:true, m:3 },
-  weather: { x:6, y:1, w:3, h:2, visible:true, m:4 },
-  calendar:{ x:9, y:1, w:3, h:2, visible:true, m:7 },
-  climate: { x:6, y:3, w:3, h:1, visible:true, m:6 },
-  lock:    { x:9, y:3, w:3, h:1, visible:true, m:1 },
+  weather: { x:6, y:1, w:6, h:1, visible:true, m:4 },
+  climate: { x:6, y:2, w:3, h:1, visible:true, m:6 },
+  calendar:{ x:9, y:2, w:3, h:2, visible:true, m:7 },
+  lock:    { x:6, y:3, w:3, h:1, visible:true, m:1 },
   garage:  { x:6, y:4, w:3, h:1, visible:true, m:2 },
   tasks:   { x:9, y:4, w:3, h:3, visible:true, m:8 },
   devices: { x:6, y:5, w:3, h:2, visible:true, m:5 },
@@ -582,6 +593,26 @@ export default function WallPanel() {
   // ---- LIVE DATA -----------------------------------------------------------
   const { entities, linkUp, bridgeUp } = useHomeHub();
 
+  // Shared device display config (hidden devices + light icon styles) -
+  // one server record so the kiosk, phones, and admin page all agree.
+  const [deviceCfg, setDeviceCfg] = useState({ hidden: [], icons: {} });
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch(`${API_URL}/api/device-config`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d) setDeviceCfg(d); })
+      .catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  const putDeviceCfg = (next) => {
+    setDeviceCfg(next);
+    fetch(`${API_URL}/api/device-config`, { method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }).catch(() => {});
+  };
+
+
   const alarm = entities.get("alarm_control_panel.homehub");
   const armed = alarm ? alarm.state.startsWith("armed") : false;
 
@@ -607,6 +638,7 @@ export default function WallPanel() {
   const baseEntity = (id) => id.replace(/#\d+$/, "");
   const typeOf = (entity) => {
     const dom = String(entity?.domain ?? "");
+    if (dom === "lock") return "lock";
     if (dom === "switch" || dom === "light") return "light";
     const dc = String(entity?.attributes?.device_class ?? "");
     if (dc === "motion" || dc === "occupancy") return "motion";
@@ -644,9 +676,10 @@ export default function WallPanel() {
       list.push({ entity_id: e.entity_id, name: e.friendly_name, state: e.state, door,
                   battery: e.attributes?.battery });
     }
-    list.sort((a, b) => a.name.localeCompare(b.name));
+    const ord = deviceCfg.order ?? {};
+    list.sort((a, b) => ((ord[a.entity_id] ?? 999) - (ord[b.entity_id] ?? 999)) || a.name.localeCompare(b.name));
     return list;
-  }, [entities]);
+  }, [entities, deviceCfg.order]);
 
   // devices tile from live light/switch domains (+ sump monitor). Locks
   // live in their own tile now — keep them out so nothing shows twice.
@@ -660,7 +693,9 @@ export default function WallPanel() {
     // group by type so the phone grid reads as lights, then switches,
     // then monitors — not one alphabetical mix
     const KIND_ORDER = { light: 0, switch: 1, monitor: 2 };
-    list.sort((a, b) => (KIND_ORDER[a.kind] - KIND_ORDER[b.kind]) || a.name.localeCompare(b.name));
+    const ord = deviceCfg.order ?? {};
+    list.sort((a, b) => ((ord[a.entity_id] ?? 999) - (ord[b.entity_id] ?? 999))
+      || (KIND_ORDER[a.kind] - KIND_ORDER[b.kind]) || a.name.localeCompare(b.name));
     const sump = entities.get("sensor.sump_pump_current");
     if (sump) list.push({ entity_id: sump.entity_id, name: `Sump ${sump.state}A`, on: true, kind: "monitor" });
     return list;
@@ -712,25 +747,6 @@ export default function WallPanel() {
     if (Number.isNaN(h)) return t;
     const ampm = h >= 12 ? "p" : "a";
     return `${((h + 11) % 12) + 1}:${String(m ?? 0).padStart(2, "0")}${ampm}`;
-  };
-
-  // Shared device display config (hidden devices + light icon styles) -
-  // one server record so the kiosk, phones, and admin page all agree.
-  const [deviceCfg, setDeviceCfg] = useState({ hidden: [], icons: {} });
-  useEffect(() => {
-    let alive = true;
-    const load = () => fetch(`${API_URL}/api/device-config`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (alive && d) setDeviceCfg(d); })
-      .catch(() => {});
-    load();
-    const iv = setInterval(load, 60000);
-    return () => { alive = false; clearInterval(iv); };
-  }, []);
-  const putDeviceCfg = (next) => {
-    setDeviceCfg(next);
-    fetch(`${API_URL}/api/device-config`, { method: "PUT", credentials: "include",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }).catch(() => {});
   };
 
   // Press feedback: Z-Wave locks answer slowly, so a tapped button pulses
@@ -843,11 +859,19 @@ export default function WallPanel() {
   // merge normally so custom arrangements stick.
   const withNewTiles = (saved) => {
     if (!saved || saved.clock?._v !== LAYOUT_V) {
-      return {
+      // geometry migration: re-flow to the current default grid but carry
+      // over everything the user configured (garage entities, hidden list,
+      // locked camera, mobile card order)
+      const next = {
         ...DEFAULT_LAYOUT,
         garage: { ...DEFAULT_LAYOUT.garage, relay: saved?.garage?.relay, sensor: saved?.garage?.sensor },
         devices: { ...DEFAULT_LAYOUT.devices, hidden: saved?.devices?.hidden ?? [] },
+        board: { ...DEFAULT_LAYOUT.board, cam: saved?.board?.cam, camLocked: saved?.board?.camLocked },
       };
+      if (saved) for (const id of Object.keys(next)) {
+        if (saved[id]?.m != null) next[id] = { ...next[id], m: saved[id].m };
+      }
+      return next;
     }
     const merged = { ...DEFAULT_LAYOUT, ...saved };
     for (const id of Object.keys(merged)) {
@@ -942,6 +966,19 @@ export default function WallPanel() {
     () => [...new Set([...(deviceCfg.hidden ?? []), ...(layout.devices?.hidden ?? [])])],
     [deviceCfg.hidden, layout.devices]
   );
+  const cfgOrder = deviceCfg.order ?? {};
+  const orderOf = (id) => cfgOrder[id] ?? 999;
+  // move an entity one step among its siblings and persist the whole
+  // sibling order so gaps/ties can't accumulate
+  const moveWithin = (list, id, dir) => {
+    const ids = [...list].sort((a, b) => orderOf(a) - orderOf(b) || a.localeCompare(b));
+    const i = ids.indexOf(id); const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    const order = { ...cfgOrder };
+    ids.forEach((eid, idx) => { order[eid] = idx; });
+    putDeviceCfg({ ...deviceCfg, order });
+  };
   const toggleDeviceHidden = (id) => {
     const cur = new Set(hiddenDevices);
     cur.has(id) ? cur.delete(id) : cur.add(id);
@@ -1104,22 +1141,26 @@ export default function WallPanel() {
     ),
     weather: (
       <Tile title="Weather" edit={edit} onToggleVisible={()=>setVisible("weather",false)}>
-        <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
-          style={{ position:"absolute", top:10, right: edit ? 38 : 12, display:"flex", alignItems:"center", gap:6,
-            background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
-            padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer", zIndex:1 }}>
-          <Radar size={13}/> Radar
-        </button>
-        <div style={{display:"flex", alignItems:"center", gap:12}}>
-          <Sun size={40} color={C.motion}/>
-          <div><div style={{fontSize:34, fontWeight:800, lineHeight:1}}>72°</div><div style={{fontSize:12, color:C.sub}}>Sunny · H76/L61</div></div>
-        </div>
-        <div style={{display:"flex", justifyContent:"space-between", marginTop:12, gap:2}}>
-          {FORECAST.map(([t,tp,Ic],i)=>(
-            <div key={i} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
-              <span style={{fontSize:10, color:C.sub}}>{t}</span><Ic size={15} color={i>3?C.sub:C.motion}/><span style={{fontSize:12, fontWeight:700}}>{tp}</span>
-            </div>
-          ))}
+        {/* one-line weather: everything on a single row */}
+        <div style={{display:"flex", alignItems:"center", gap:14, height:"100%", minWidth:0}}>
+          <Sun size={30} color={C.motion} style={{flexShrink:0}}/>
+          <span style={{fontSize:28, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
+          <span style={{fontSize:12, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>
+          <div style={{display:"flex", gap:12, marginLeft:"auto", overflow:"hidden"}}>
+            {FORECAST.map(([t,tp,Ic],i)=>(
+              <div key={i} style={{display:"flex", alignItems:"center", gap:4, flexShrink:0}}>
+                <span style={{fontSize:10, color:C.sub}}>{t}</span>
+                <Ic size={13} color={i>3?C.sub:C.motion}/>
+                <span style={{fontSize:12, fontWeight:700}}>{tp}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
+            style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0,
+              background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
+              padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+            <Radar size={13}/> Radar
+          </button>
         </div>
       </Tile>
     ),
@@ -1221,14 +1262,38 @@ export default function WallPanel() {
     ),
     lock: (
       <Tile title="Locks" edit={edit} onToggleVisible={()=>setVisible("lock",false)} fit>
+        {isMobile && (
+          <button onClick={()=>setDevicePick(p=>!p)}
+            style={{ display:"inline-flex", alignItems:"center", gap:5, marginBottom:8, background: devicePick?C.accent:C.cardHi,
+              color: devicePick?"#0c0e13":C.sub, border:`1px solid ${devicePick?C.accent:C.edge}`, borderRadius:8,
+              padding:"5px 9px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+            <Eye size={12}/>{devicePick ? "Done" : "Show / hide"}
+          </button>
+        )}
         <div style={{display:"flex", flexDirection:"column", gap:10, justifyContent:"center", height:"100%"}}>
           {locks.length === 0 && <span style={{fontSize:12, color:C.sub}}>No locks paired.</span>}
-          {locks.map((l)=>{
+          {locks.filter(l => (edit || devicePick) || !hiddenDevices.includes(l.entity_id)).map((l)=>{
+            const lockHidden = hiddenDevices.includes(l.entity_id);
+            const lockPicking = edit || devicePick;
             const locked = l.state === "locked";
             const jammed = l.state === "jammed";
             const inMotion = l.state === "locking" || l.state === "unlocking";
             return (
-              <div key={l.entity_id} style={{display:"flex", alignItems:"center", gap:12}}>
+              <div key={l.entity_id} style={{display:"flex", alignItems:"center", gap:12, opacity: lockHidden ? 0.35 : 1}}>
+                {lockPicking && (
+                  <span style={{display:"flex", flexDirection:"column", gap:3, flexShrink:0}}>
+                    <button onClick={()=>toggleDeviceHidden(l.entity_id)} aria-label={lockHidden?"Show lock":"Hide lock"}
+                      style={{background:"transparent", border:`1px solid ${lockHidden?C.open:C.edge}`, borderRadius:6, padding:"3px 5px", cursor:"pointer"}}>
+                      {lockHidden ? <EyeOff size={12} color={C.open}/> : <Eye size={12} color={C.subDim}/>}
+                    </button>
+                    <span style={{display:"flex", gap:3}}>
+                      <button onClick={()=>moveWithin(locks.map(x=>x.entity_id), l.entity_id, -1)} aria-label="Move up"
+                        style={{background:"transparent", border:`1px solid ${C.edge}`, borderRadius:6, padding:"1px 6px", fontSize:11, color:C.sub, cursor:"pointer"}}>↑</button>
+                      <button onClick={()=>moveWithin(locks.map(x=>x.entity_id), l.entity_id, 1)} aria-label="Move down"
+                        style={{background:"transparent", border:`1px solid ${C.edge}`, borderRadius:6, padding:"1px 6px", fontSize:11, color:C.sub, cursor:"pointer"}}>↓</button>
+                    </span>
+                  </span>
+                )}
                 {/* Door-indicator convention (Eric's call): red = locked/no
                     entry, green = unlocked/go. Intentionally opposite of the
                     sensor board's green=secure — do not "fix" this. */}
@@ -1292,15 +1357,29 @@ export default function WallPanel() {
               {d.kind==="switch" && <Zap size={isMobile?17:15} color={d.on?C.secure:C.subDim} style={{flexShrink:0}}/>}
               {d.kind==="monitor" && <Wifi size={isMobile?17:15} color={C.secure} style={{flexShrink:0}}/>}
               <span style={{fontSize: isMobile?12:11, fontWeight:600, minWidth:0, flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
+              {picking && (<span style={{display:"flex", gap:2, flexShrink:0}} onClick={(e)=>e.stopPropagation()}>
+                <span onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, -1)} style={{padding:"2px 5px", border:`1px solid ${C.edge}`, borderRadius:6, fontSize:11, cursor:"pointer", color:C.sub}}>‹</span>
+                <span onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, 1)} style={{padding:"2px 5px", border:`1px solid ${C.edge}`, borderRadius:6, fontSize:11, cursor:"pointer", color:C.sub}}>›</span>
+              </span>)}
             </button>
           );})}
         </div>
         <div style={{display:"flex", gap:6}}>
-          {SCENES.map(([n,Ic])=>(
-            <button key={n} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:C.cardHi, border:`1px solid ${C.edge}`, borderRadius:10, padding:"9px 4px", cursor:"pointer", color:C.text }}>
+          {SCENES.filter(([n]) => (edit || devicePick) || !hiddenDevices.includes(`scene:${n}`)).map(([n,Ic])=>{
+            const sid = `scene:${n}`;
+            const hidden = hiddenDevices.includes(sid);
+            const picking = edit || devicePick;
+            return (
+            <button key={n} onClick={()=> picking && toggleDeviceHidden(sid)}
+              style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                background:C.cardHi, border:`1px solid ${picking && hidden ? C.open : C.edge}`, borderRadius:10,
+                padding:"9px 4px", cursor:"pointer", color:C.text, opacity: hidden ? 0.35 : 1, position:"relative" }}>
+              {picking && (hidden
+                ? <EyeOff size={12} color={C.open} style={{position:"absolute", top:4, right:4}}/>
+                : <Eye size={12} color={C.subDim} style={{position:"absolute", top:4, right:4}}/>)}
               <Ic size={15} color={C.accent}/><span style={{fontSize:10}}>{n}</span>
             </button>
-          ))}
+          );})}
         </div>
       </Tile>
     ),

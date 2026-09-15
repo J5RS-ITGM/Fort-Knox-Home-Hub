@@ -340,12 +340,13 @@ async def get_device_config(session: AsyncSession = Depends(get_session)) -> dic
         select(models.AppSetting).where(models.AppSetting.key == DEVICE_CFG_KEY)
     )).scalar_one_or_none()
     if not row or not row.value:
-        return {"hidden": [], "icons": {}}
+        return {"hidden": [], "icons": {}, "order": {}}
     try:
         data = _json.loads(row.value)
     except ValueError:
-        return {"hidden": [], "icons": {}}
-    return {"hidden": data.get("hidden", []), "icons": data.get("icons", {})}
+        return {"hidden": [], "icons": {}, "order": {}}
+    return {"hidden": data.get("hidden", []), "icons": data.get("icons", {}),
+            "order": data.get("order", {})}
 
 
 @protected.put("/device-config")
@@ -353,15 +354,17 @@ async def put_device_config(body: dict, session: AsyncSession = Depends(get_sess
     hidden = [str(x) for x in body.get("hidden", [])][:500]
     icons = {str(k): (v if v in ("ceiling", "sconce") else "ceiling")
              for k, v in dict(body.get("icons", {})).items()}
+    order = {str(k): int(v) for k, v in dict(body.get("order", {})).items()
+             if isinstance(v, (int, float))}
     row = (await session.execute(
         select(models.AppSetting).where(models.AppSetting.key == DEVICE_CFG_KEY)
     )).scalar_one_or_none()
     if row is None:
         row = models.AppSetting(key=DEVICE_CFG_KEY)
         session.add(row)
-    row.value = _json.dumps({"hidden": hidden, "icons": icons})
+    row.value = _json.dumps({"hidden": hidden, "icons": icons, "order": order})
     await session.commit()
-    return {"hidden": hidden, "icons": icons}
+    return {"hidden": hidden, "icons": icons, "order": order}
 
 
 @protected.get("/layouts/{panel_key}", response_model=LayoutOut)

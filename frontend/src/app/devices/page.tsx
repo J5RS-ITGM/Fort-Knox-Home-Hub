@@ -85,7 +85,7 @@ function DevicesInner() {
   }, [entities, filter, domain]);
 
   const isLightish = (e: Entity) => e.domain === "light" || e.domain === "switch";
-  const panelable = (e: Entity) => e.domain === "light" || e.domain === "switch"; // Devices tile shows these
+  const panelable = (e: Entity) => ["light", "switch", "lock", "cover"].includes(e.domain); // panel tiles show these
   const hiddenSet = useMemo(() => new Set(cfg.hidden), [cfg.hidden]);
 
   const togglePanel = (id: string) => {

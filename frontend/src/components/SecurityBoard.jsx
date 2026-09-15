@@ -39,7 +39,7 @@ const hx = (h) => {
 const FLOOR_H = 3.6; // (retained for label drag math on legacy stacked refs)
 const SIDE_OFFSET = 9.0; // upstairs sits this far +X of the ground floor
 
-const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO", light:"Light" };
+const TYPE_LABEL = { contact:"Contact", motion:"Motion", leak:"Leak", smoke:"Smoke/CO", light:"Light", lock:"Lock" };
 
 
 // rooms: [centerX, centerZ, width, depth, label] per floor (static demo plan)
@@ -65,6 +65,7 @@ const baseEntity = (id) => String(id).replace(/#\d+$/, "");
 
 function typeFor(entity) {
   const dom = String(entity?.domain ?? entity?.entity_id?.split(".")[0] ?? "");
+  if (dom === "lock") return "lock";
   if (dom === "switch" || dom === "light") return "light";
   const dc = String(entity?.attributes?.device_class ?? "");
   if (dc === "motion" || dc === "occupancy") return "motion";
@@ -81,6 +82,7 @@ function liveFor(type, entity) {
   const on = entity.state === "on";
   let state = "secure";
   if (type === "light") state = on ? "lit" : "dark";
+  else if (type === "lock") state = entity.state === "unlocked" || entity.state === "jammed" ? "open" : "secure";
   else if (type === "motion") state = on ? "motion" : "secure";
   else if (type === "smoke") state = on ? "triggered" : "secure";
   else {
@@ -224,11 +226,12 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       const grp = new THREE.Group();
       const isLight = s.type === "light";
       const isContact = s.type === "contact";
-      // Contacts are wall elements, not pins: snap onto the nearest wall and
-      // inherit its orientation. Stored coords stay raw; only display snaps.
+      const isLock = s.type === "lock";
+      // Contacts and locks are wall elements, not pins: snap onto the
+      // nearest wall. Stored coords stay raw; only display snaps.
       let gx = s.x, gz = s.z, horiz = true;
       const planFor = s.floor === 0 ? plan : plan2;
-      if (isContact && planFor) {
+      if ((isContact || isLock) && planFor) {
         const pp = planFromGrid(s.x, s.z);
         const sn = snapToWall(planFor, pp.px, pp.py);
         if (sn) { const g2 = gridFromPlan(sn.px, sn.py); gx = g2.x; gz = g2.y; horiz = sn.horiz; }
@@ -283,6 +286,15 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
         }
         glow.rotation.x = -Math.PI/2; glow.position.y = -0.485;
         grp.add(glow);
+      } else if (isLock) {
+        // mini padlock beside the door: body + shackle share one material so
+        // the whole badge tints green (locked) / red (unlocked)
+        const mat = new THREE.MeshStandardMaterial({ color:hx(C.secure), emissive:hx(C.secure), emissiveIntensity:0.6, roughness:0.3 });
+        sphere = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.16, 0.08), mat);
+        const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.022, 10, 16, Math.PI), mat);
+        shackle.position.y = 0.08;
+        sphere.add(shackle);
+        sphere.position.y = 0.35; // floats just above the door element
       } else {
         // motion / leak / smoke: small floating diamond, no pin line
         sphere = new THREE.Mesh(
@@ -745,7 +757,7 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
 
         {sensors.filter(s => s.floor === 0).map(s => {
           const raw = planFromGrid(s.x, s.z);
-          const sn = s.type === "contact" && plan ? snapToWall(plan, raw.px, raw.py) : null;
+          const sn = (s.type === "contact" || s.type === "lock") && plan ? snapToWall(plan, raw.px, raw.py) : null;
           const px = sn?.px ?? raw.px, py = sn?.py ?? raw.py;
           const horiz = sn?.horiz ?? true;
           const live = liveState[s.entity_id];
@@ -782,6 +794,12 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
                     ? <line x1={px-23} y1={py} x2={px+23} y2={py} stroke={col} strokeWidth={7} strokeLinecap="round"/>
                     : <line x1={px} y1={py-23} x2={px} y2={py+23} stroke={col} strokeWidth={7} strokeLinecap="round"/>
                 )
+              ) : s.type === "lock" ? (
+                <g>
+                  <path d={`M ${px-5.5} ${py-3} v-3 a 5.5 5.5 0 0 1 11 0 v3`} fill="none" stroke={col} strokeWidth={2.6}/>
+                  <rect x={px-8} y={py-3} width={16} height={13} rx={3} fill={col} stroke={isSel ? C.text : "none"} strokeWidth={isSel ? 1.5 : 0}/>
+                  <circle cx={px} cy={py+3.5} r={2} fill="#0f1116"/>
+                </g>
               ) : s.type === "light" ? (
                 style === "sconce" ? (
                   <g>
@@ -1140,7 +1158,7 @@ export default function SecurityBoard() {
     const sconce = t === "light" && (deviceCfg.icons?.[baseEntity(entityId)] ?? "ceiling") === "sconce";
     const pRow = placements?.find(q => q.entity_id === entityId);
     const planFor = (pRow?.floor ?? 0) === 0 ? plan : plan2;
-    if ((t === "contact" || sconce) && planFor) {
+    if ((t === "contact" || t === "lock" || sconce) && planFor) {
       const pp = planFromGrid(x, z);
       const sn = snapToWall(planFor, pp.px, pp.py);
       if (sn) { const g2 = gridFromPlan(sn.px, sn.py); x = g2.x; z = g2.y; }
@@ -1334,7 +1352,7 @@ export default function SecurityBoard() {
             <span style={{color:C.sub}}>{open ? "▾" : "▸"}</span>
           </button>
           {open && list.map(s => {
-        const c = { contact:C.secure, motion:C.motion, leak:C.accent, smoke:C.open, light:C.motion }[s.type] || C.sub;
+        const c = { contact:C.secure, motion:C.motion, leak:C.accent, smoke:C.open, light:C.motion, lock:C.secure }[s.type] || C.sub;
         const armedForPlace = pendingPlace?.entity_id === s.entity_id;
         return (
           <button key={s.entity_id}
