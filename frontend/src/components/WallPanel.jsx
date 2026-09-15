@@ -75,7 +75,7 @@ function colorFor(type, live, armed) {
   return C.secure;
 }
 
-function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, themeTick, deviceIcons, camCfg, camLocked, onCamChange, onToggleCamLock }) {
+function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, themeTick, deviceIcons, camCfg, camLocked, onCamChange, onToggleCamLock, labelScale }) {
   const mountRef = useRef();
   const zoomApi = useRef(null);
   const lockedRef = useRef(camLocked);
@@ -157,7 +157,7 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
     // Room labels: the same records the Security board editor maintains.
     (labels ?? []).forEach((l) => {
       if (!l.text) return;
-      const spr = makeTextSprite(l.text, { scale: 0.9 });
+      const spr = makeTextSprite(l.text, { scale: 0.9 * (labelScale ?? 1) });
       spr.position.set(l.x, l.floor * FLOOR_H_P + 0.9, l.z);
       floorGroups[l.floor]?.add(spr);
     });
@@ -290,7 +290,7 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
       renderer.domElement.removeEventListener("pointercancel", onPU);
       zoomApi.current = null;
       renderer.dispose(); if(renderer.domElement.parentNode) mount.removeChild(renderer.domElement); };
-  }, [floorView, plan, placements, labels, liveStateRef, armedRef, themeTick, deviceIcons]);  // camCfg init-only by design
+  }, [floorView, plan, placements, labels, liveStateRef, armedRef, themeTick, deviceIcons, labelScale]);  // camCfg init-only by design
   const zb = { width:34, height:34, display:"grid", placeItems:"center", background:"rgba(15,17,22,0.8)",
     color:C.text, fontSize:16, fontWeight:700, border:`1px solid ${C.edge}`, borderRadius:9, cursor:"pointer" };
   return (
@@ -716,7 +716,7 @@ export default function WallPanel() {
     const sump = entities.get("sensor.sump_pump_current");
     if (sump) list.push({ entity_id: sump.entity_id, name: `Sump ${sump.state}A`, on: true, kind: "monitor" });
     return list;
-  }, [entities]);
+  }, [entities, deviceCfg.order]);
 
   const climateRows = useMemo(() => {
     const rows = [];
@@ -1143,15 +1143,15 @@ export default function WallPanel() {
         {!isMobile && (
         <div style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", gap:14,
           padding:"0 20px", background:C.card, border:`1px solid ${C.edge}`, borderRadius:16 }}>
-          <Sun size={26} color={C.motion} style={{flexShrink:0}}/>
-          <span style={{fontSize:24, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
-          <span style={{fontSize:12, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>
-          <div style={{display:"flex", gap:14, overflow:"hidden", marginLeft:"auto"}}>
+          <Sun size={34} color={C.motion} style={{flexShrink:0}}/>
+          <span style={{fontSize:34, fontWeight:800, lineHeight:1, flexShrink:0, fontVariantNumeric:"tabular-nums"}}>72°</span>
+          <span style={{fontSize:16, fontWeight:600, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>
+          <div style={{display:"flex", gap:16, overflow:"hidden", marginLeft:"auto"}}>
             {FORECAST.map(([t,tp,Ic],i)=>(
-              <div key={i} style={{display:"flex", alignItems:"center", gap:4, flexShrink:0}}>
-                <span style={{fontSize:11, color:C.sub}}>{t}</span>
-                <Ic size={13} color={i>3?C.sub:C.motion}/>
-                <span style={{fontSize:13, fontWeight:700}}>{tp}</span>
+              <div key={i} style={{display:"flex", alignItems:"center", gap:5, flexShrink:0}}>
+                <span style={{fontSize:13, color:C.sub}}>{t}</span>
+                <Ic size={17} color={i>3?C.sub:C.motion}/>
+                <span style={{fontSize:16, fontWeight:700}}>{tp}</span>
               </div>
             ))}
           </div>
@@ -1170,6 +1170,7 @@ export default function WallPanel() {
       <Tile edit={edit} onToggleVisible={()=>setVisible("board",false)} style={{padding:0}}>
         <div style={{position:"absolute", inset:0}}><Board plan={plan} placements={placements} labels={labels} liveStateRef={liveStateRef} armedRef={armedRef} floorView={floorView} themeTick={themeTick}
           deviceIcons={deviceCfg.icons}
+          labelScale={deviceCfg.board?.labelScale ?? 1}
           camCfg={layout.board?.cam}
           camLocked={!!layout.board?.camLocked}
           onCamChange={(cam)=>{ clearTimeout(camSaveRef.current); camSaveRef.current = setTimeout(()=>setLayout(prev=>({ ...prev, board:{ ...prev.board, cam } })), 400); }}
@@ -1401,9 +1402,10 @@ export default function WallPanel() {
             const hidden = hiddenDevices.includes(d.entity_id);
             const picking = edit || devicePick; // edit (desktop) / Show-hide chip (mobile)
             return (
-            <button key={d.entity_id}
+            <div key={d.entity_id} style={{display:"flex", alignItems:"stretch", gap:4, minWidth:0}}>
+            <button
               onClick={()=> picking ? toggleDeviceHidden(d.entity_id) : toggleDevice(d)}
-              style={{ display:"flex", alignItems:"center", gap:7, minWidth:0, opacity: hidden ? 0.35 : 1,
+              style={{ display:"flex", alignItems:"center", gap:7, minWidth:0, flex:1, opacity: hidden ? 0.35 : 1,
                 background: d.on&&d.kind!=="monitor"&&!hidden?"rgba(107,138,253,0.15)":C.cardHi,
                 border:`1px solid ${picking && hidden ? C.open : d.on&&d.kind!=="monitor"?C.accent:C.edge}`,
                 borderRadius:10, padding: "12px 12px",
@@ -1413,11 +1415,17 @@ export default function WallPanel() {
               {d.kind==="switch" && <Zap size={17} color={d.on?C.secure:C.subDim} style={{flexShrink:0}}/>}
               {d.kind==="monitor" && <Wifi size={17} color={C.secure} style={{flexShrink:0}}/>}
               <span style={{fontSize:12.5, fontWeight:600, minWidth:0, flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{d.name}</span>
-              {picking && (<span style={{display:"flex", gap:2, flexShrink:0}} onClick={(e)=>e.stopPropagation()}>
-                <span onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, -1)} style={{padding:"2px 5px", border:`1px solid ${C.edge}`, borderRadius:6, fontSize:11, cursor:"pointer", color:C.sub}}>‹</span>
-                <span onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, 1)} style={{padding:"2px 5px", border:`1px solid ${C.edge}`, borderRadius:6, fontSize:11, cursor:"pointer", color:C.sub}}>›</span>
-              </span>)}
             </button>
+            {picking && (
+              <span style={{display:"flex", gap:3, flexShrink:0, alignItems:"center"}}
+                onClick={(e)=>e.stopPropagation()} onPointerDown={(e)=>e.stopPropagation()}>
+                <button aria-label="Move earlier" onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, -1)}
+                  style={{padding:"6px 9px", background:C.cardHi, border:`1px solid ${C.edge}`, borderRadius:7, fontSize:13, cursor:"pointer", color:C.sub}}>‹</button>
+                <button aria-label="Move later" onClick={()=>moveWithin(devices.map(x=>x.entity_id), d.entity_id, 1)}
+                  style={{padding:"6px 9px", background:C.cardHi, border:`1px solid ${C.edge}`, borderRadius:7, fontSize:13, cursor:"pointer", color:C.sub}}>›</button>
+              </span>
+            )}
+            </div>
           );})}
         </div>
         <div style={{display:"flex", gap:6}}>

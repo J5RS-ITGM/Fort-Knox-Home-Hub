@@ -340,13 +340,13 @@ async def get_device_config(session: AsyncSession = Depends(get_session)) -> dic
         select(models.AppSetting).where(models.AppSetting.key == DEVICE_CFG_KEY)
     )).scalar_one_or_none()
     if not row or not row.value:
-        return {"hidden": [], "icons": {}, "order": {}}
+        return {"hidden": [], "icons": {}, "order": {}, "board": {}}
     try:
         data = _json.loads(row.value)
     except ValueError:
-        return {"hidden": [], "icons": {}, "order": {}}
+        return {"hidden": [], "icons": {}, "order": {}, "board": {}}
     return {"hidden": data.get("hidden", []), "icons": data.get("icons", {}),
-            "order": data.get("order", {})}
+            "order": data.get("order", {}), "board": data.get("board", {})}
 
 
 @protected.put("/device-config")
@@ -356,15 +356,22 @@ async def put_device_config(body: dict, session: AsyncSession = Depends(get_sess
              for k, v in dict(body.get("icons", {})).items()}
     order = {str(k): int(v) for k, v in dict(body.get("order", {})).items()
              if isinstance(v, (int, float))}
+    board_in = dict(body.get("board", {}))
+    board = {}
+    try:
+        ls = float(board_in.get("labelScale", 1.0))
+        board["labelScale"] = min(1.8, max(0.6, ls))
+    except (TypeError, ValueError):
+        board["labelScale"] = 1.0
     row = (await session.execute(
         select(models.AppSetting).where(models.AppSetting.key == DEVICE_CFG_KEY)
     )).scalar_one_or_none()
     if row is None:
         row = models.AppSetting(key=DEVICE_CFG_KEY)
         session.add(row)
-    row.value = _json.dumps({"hidden": hidden, "icons": icons, "order": order})
+    row.value = _json.dumps({"hidden": hidden, "icons": icons, "order": order, "board": board})
     await session.commit()
-    return {"hidden": hidden, "icons": icons, "order": order}
+    return {"hidden": hidden, "icons": icons, "order": order, "board": board}
 
 
 @protected.get("/layouts/{panel_key}", response_model=LayoutOut)

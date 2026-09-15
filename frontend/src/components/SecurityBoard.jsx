@@ -7,6 +7,7 @@ import { useHomeHub } from "@/lib/useHomeHub";
 import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
+import PanelNav from "@/components/PanelNav";
 import {
   PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
   planFromGrid, gridFromPlan, gridRect,
@@ -127,7 +128,7 @@ function useIsNarrow(bp = 760) {
 // labels: [{id, text, floor, x, z}] — draggable in edit mode, dbl-tap to
 // rename. view: {zoom, tx, tz} initial camera state. onView fires
 // (debounced upstream) so zoom/pan persist per panel.
-function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow, themeTick, deviceIcons }) {
+function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef, selectedRef, editRef, floorView, onPick, onMoved, onLabelMoved, onLabelRename, onView, narrow, themeTick, deviceIcons, labelScale = 1 }) {
   const mountRef = useRef();
   const zoomApi = useRef(null);
 
@@ -181,7 +182,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
     const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(8,14,6); scene.add(key);
     const fill = new THREE.DirectionalLight(0x6b7ce0, 0.25); fill.position.set(-6,8,-4); scene.add(fill);
 
-    const makeLabel = (text, ghost = false) => makeTextSprite(text, { ghost });
+    const makeLabel = (text, ghost = false) => makeTextSprite(text, { ghost, scale: labelScale });
 
     function buildFloor(y, floorIdx) {
       const g = new THREE.Group();
@@ -593,7 +594,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
       renderer.dispose();
       if (renderer.domElement.parentNode) mount.removeChild(renderer.domElement);
     };
-  }, [floorView, narrow, sensors, plan, plan2, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView, themeTick, deviceIcons]);
+  }, [floorView, narrow, sensors, plan, plan2, labels, liveStateRef, armedRef, selectedRef, editRef, onPick, onMoved, onLabelMoved, onLabelRename, onView, themeTick, deviceIcons, labelScale]);
 
   const zbtn = {
     width: 40, height: 40, display: "grid", placeItems: "center",
@@ -624,7 +625,7 @@ function ThreeScene({ sensors, plan, plan2, labels, view, liveStateRef, armedRef
 // sensor_placements. Ground-floor placements only (floor 0); the plan
 // is the first floor.
 // ------------------------------------------------------------------
-function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt, plan, icons }) {
+function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMoved, pendingPlace, onPlaceAt, plan, icons, labelScale = 1 }) {
   const svgRef = useRef();
   const dragging = useRef(null);
 
@@ -827,7 +828,7 @@ function FloorPlan2D({ sensors, liveState, armed, selected, edit, onPick, onMove
                 </g>
               )}
               {(edit || isSel) && (
-                <text x={px} y={py - 20} fill={C.text} fontSize="14" textAnchor="middle"
+                <text x={px} y={py - 20} fill={C.text} fontSize={14 * labelScale} textAnchor="middle"
                       style={{ paintOrder:"stroke", stroke:"#000", strokeWidth:3, pointerEvents:"none" }}>
                   {s.label}
                 </text>
@@ -909,6 +910,14 @@ export default function SecurityBoard() {
       .catch(() => {});
     return () => { dead = true; };
   }, []);
+  const labelScale = deviceCfg.board?.labelScale ?? 1;
+  const bumpLabelScale = (d) => {
+    const next = { ...deviceCfg, board: { ...deviceCfg.board,
+      labelScale: Math.min(1.8, Math.max(0.6, +((labelScale + d)).toFixed(2))) } };
+    setDeviceCfg(next);
+    fetch(`${API_URL}/api/device-config`, { method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }).catch(() => {});
+  };
   useEffect(() => {
     let cancelled = false;
     fetch(PLAN_JSON_URL)
@@ -1282,8 +1291,14 @@ export default function SecurityBoard() {
         )}
         {saveNote && <span style={{fontSize:11, color:C.accent, whiteSpace:"nowrap"}}>{saveNote}</span>}
         <AlarmStatus state={alarmState} command={command}/>
+        <span style={{marginLeft:4}}><PanelNav inline/></span>
       </div>
       <div style={{display:"flex", gap:8, alignItems:"center"}}>
+        {edit && (<>
+          <Pill onClick={()=>bumpLabelScale(-0.1)} label="A−" tone={C.sub}/>
+          <span style={{fontSize:11, color:C.sub, minWidth:32, textAlign:"center"}}>{Math.round(labelScale*100)}%</span>
+          <Pill onClick={()=>bumpLabelScale(0.1)} label="A+" tone={C.sub}/>
+        </>)}
         <Pill active={edit} onClick={()=>{ setEdit(e=>!e); setSelected(null); }} label={edit?"Done":"Edit"} tone={C.accent}/>
         <AlarmControl variant="compact" />
       </div>
@@ -1303,14 +1318,14 @@ export default function SecurityBoard() {
     </div>
   ) : viewMode === "plan" ? (
     <FloorPlan2D
-      sensors={sensors} liveState={liveState} armed={armed} plan={resolvedPlan} icons={deviceCfg.icons}
+      sensors={sensors} liveState={liveState} armed={armed} plan={resolvedPlan} icons={deviceCfg.icons} labelScale={labelScale}
       selected={selected} edit={edit} onPick={setSelected} onMoved={onMoved}
       pendingPlace={pendingPlace}
       onPlaceAt={(sensor, x, y) => { placeSensor(sensor.entity_id, x, y, 0); setPendingPlace(null); }}
     />
   ) : (
     <ThreeScene
-      sensors={sensors} plan={resolvedPlan} plan2={plan2} labels={labels} deviceIcons={deviceCfg.icons} view={boardState.view}
+      sensors={sensors} plan={resolvedPlan} plan2={plan2} labels={labels} deviceIcons={deviceCfg.icons} labelScale={labelScale} view={boardState.view}
       liveStateRef={liveStateRef} armedRef={armedRef} selectedRef={selectedRef} editRef={editRef}
       floorView={floorView} onPick={setSelected} onMoved={onMoved}
       onLabelMoved={onLabelMoved} onLabelRename={onLabelRename} onView={onView} narrow={narrow}
