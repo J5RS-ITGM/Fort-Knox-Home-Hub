@@ -372,6 +372,9 @@ SETTING_KEYS = {
     "theme_mode", "theme_accent",
     # security board default view: "iso" (3D exploded) | "plan" (flat)
     "security_view",
+    # weather source override: an HA weather.* entity_id; blank = auto-detect
+    # the first weather entity HA exposes (see /api/weather)
+    "weather_entity",
 }
 
 

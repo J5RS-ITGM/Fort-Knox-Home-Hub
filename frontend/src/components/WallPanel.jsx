@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import {
-  Lock, Unlock, Sun, Cloud, Droplets, CheckSquare, Lightbulb, Zap, Wifi,
+  Lock, Unlock, Sun, Cloud, CloudDrizzle, CloudFog, CloudLightning, CloudRain, CloudSnow,
+  Droplets, CheckSquare, Lightbulb, Zap, Wifi,
   Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause, Warehouse,
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
@@ -11,7 +12,7 @@ import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardSta
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
-import PanelNav from "@/components/PanelNav";
+import TopMenu from "@/components/TopMenu";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 /* ------------------------------------------------------------------ *
@@ -296,7 +297,9 @@ function Board({ plan, placements, labels, liveStateRef, armedRef, floorView, th
   return (
     <div style={{ width:"100%", height:"100%", position:"relative" }}>
       <div ref={mountRef} style={{ width:"100%", height:"100%", touchAction:"none" }} />
-      <div style={{ position:"absolute", right:10, bottom:10, display:"flex", flexDirection:"column", gap:6, zIndex:3 }}>
+      {/* zoom/lock controls sit ABOVE the status legend pill (bottom-right)
+          — at bottom:10 the lock button covered the end of the counts. */}
+      <div style={{ position:"absolute", right:10, bottom:56, display:"flex", flexDirection:"column", gap:6, zIndex:3 }}>
         {!camLocked && (<>
           <button style={zb} aria-label="Zoom in" onClick={()=>zoomApi.current?.in()}>+</button>
           <button style={zb} aria-label="Zoom out" onClick={()=>zoomApi.current?.out()}>−</button>
@@ -508,10 +511,59 @@ const rBtn = { width:42, height:42, borderRadius:11, background:C.cardHi, color:
 // ================= STATIC TILE CONTENT (pending modules) =====================
 const SCENES = [ ["Morning",Sun], ["Movie",Play], ["Away",Lock], ["Night",Moon] ];
 // calendar events come live from /api/events (stock demo list retired)
-const FORECAST = [ ["Now","72°",Sun], ["1p","75°",Sun], ["2p","76°",Sun], ["3p","74°",Cloud], ["4p","71°",Cloud], ["5p","68°",Droplets] ];
+
+// ================= WEATHER (live — HA weather entity via backend) ============
+// /api/weather assembles current conditions + forecast (incl. rain %) from
+// the HA weather entity through the bridge. HA stays the source of truth;
+// no weather-service egress from the frontend or backend.
+const CONDITION_ICON = {
+  sunny: Sun, clear: Sun, "clear-night": Moon,
+  partlycloudy: Cloud, cloudy: Cloud, windy: Cloud, "windy-variant": Cloud, exceptional: Cloud,
+  rainy: CloudRain, pouring: CloudRain, hail: CloudRain,
+  drizzle: CloudDrizzle,
+  lightning: CloudLightning, "lightning-rainy": CloudLightning,
+  snowy: CloudSnow, "snowy-rainy": CloudSnow,
+  fog: CloudFog,
+};
+const condIcon = (c) => CONDITION_ICON[String(c || "").toLowerCase()] ?? Cloud;
+const condColor = (c) => {
+  const k = String(c || "").toLowerCase();
+  if (k === "sunny" || k === "clear") return C.motion;             // warm
+  if (k.includes("rain") || k.includes("pour") || k.includes("drizzle") || k.includes("lightning")) return C.accent;
+  return C.sub;
+};
+const condText = (c) => {
+  const map = { partlycloudy: "Partly cloudy", "clear-night": "Clear", "lightning-rainy": "Storms",
+                "snowy-rainy": "Wintry mix", "windy-variant": "Windy" };
+  const k = String(c || "").toLowerCase();
+  return map[k] ?? (k ? k.charAt(0).toUpperCase() + k.slice(1) : "—");
+};
+const hourLabel = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const h = d.getHours();
+  return `${((h + 11) % 12) + 1}${h >= 12 ? "p" : "a"}`;
+};
+
+function useWeather() {
+  const [wx, setWx] = useState(null); // null = loading, {available:false} or full payload
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch(`${API_URL}/api/weather`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d) setWx(d); })
+      .catch(() => {});
+    load();
+    const iv = setInterval(load, 10 * 60 * 1000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  return wx;
+}
 
 // ================= CLOCK =====================
-function ClockStrip({ extra, compact }) {
+// Its own tile now (weather split off) — fills whatever size the tile is.
+function ClockStrip() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -521,36 +573,37 @@ function ClockStrip({ extra, compact }) {
   const secs = now.toLocaleTimeString([], { second: "2-digit" }).padStart(2, "0");
   const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   return (
-    <div style={{ width: compact ? "auto" : "100%", minHeight:"100%", display:"flex", alignItems:"center",
-                  gap:14, flexWrap: compact ? "nowrap" : "wrap", flexShrink:0,
-                  padding:"16px 20px", boxSizing:"border-box",
+    <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
+                  gap:14, flexWrap:"wrap", rowGap:2, overflow:"hidden",
+                  padding:"12px 20px", boxSizing:"border-box",
                   background:C.card, border:`1px solid ${C.edge}`, borderRadius:16 }}>
       <span style={{ fontSize:34, fontWeight:800, color:C.text, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{time}</span>
       <span style={{ fontSize:15, fontWeight:700, color:C.subDim, fontVariantNumeric:"tabular-nums" }}>:{secs}</span>
       <span style={{ fontSize:16, fontWeight:600, color:C.sub }}>{date}</span>
-      {extra}
     </div>
   );
 }
 
 // ================= LAYOUT =====================
 const GRID_COLS = 12;
-// v2 layout: row 0 is a compact clock strip (fixed px), rows 1..6 share the
-// remaining viewport so nothing falls below the fold. Board gets the full
-// left half; radar is hidden by default (the Weather tile has a radar
-// button). Each tile: desktop slot (x,y,w,h), visibility, and `m` = mobile
-// stack order.
-const LAYOUT_V = 4;
+// v5 layout: the clock and weather are two SEPARATE tiles sharing row 0 —
+// both move/resize like any other tile, and all 7 rows are the same unit
+// height, so resizing the weather tile to h:1 makes it exactly the clock
+// tile's height (that was impossible while row 0 was a special fixed
+// strip). Board keeps the full left half below them. Radar stays hidden by
+// default (the Weather tile has a radar button). Each tile: desktop slot
+// (x,y,w,h), visibility, and `m` = mobile stack order.
+const LAYOUT_V = 5;
 const DEFAULT_LAYOUT = {
-  clock:   { x:0, y:0, w:12, h:1, visible:true, m:0, _v:LAYOUT_V },
-  board:   { x:0, y:1, w:6, h:6, visible:true, m:3 },
-  climate: { x:6, y:1, w:3, h:1, visible:true, m:6 },
-  calendar:{ x:9, y:1, w:3, h:2, visible:true, m:7 },
-  lock:    { x:6, y:2, w:3, h:1, visible:true, m:1 },
-  garage:  { x:6, y:3, w:3, h:1, visible:true, m:2 },
-  devices: { x:6, y:4, w:3, h:3, visible:true, m:5 },
-  tasks:   { x:9, y:3, w:3, h:4, visible:true, m:8 },
-  weather: { x:6, y:1, w:6, h:1, visible:false, m:4 },
+  clock:   { x:0, y:0, w:6, h:1, visible:true, m:0, _v:LAYOUT_V },
+  weather: { x:6, y:0, w:6, h:1, visible:true, m:1 },
+  board:   { x:0, y:1, w:6, h:6, visible:true, m:4 },
+  climate: { x:6, y:1, w:3, h:1, visible:true, m:7 },
+  calendar:{ x:9, y:1, w:3, h:2, visible:true, m:8 },
+  lock:    { x:6, y:2, w:3, h:1, visible:true, m:2 },
+  garage:  { x:6, y:3, w:3, h:1, visible:true, m:3 },
+  devices: { x:6, y:4, w:3, h:3, visible:true, m:6 },
+  tasks:   { x:9, y:3, w:3, h:4, visible:true, m:5 },
   radar:   { x:9, y:1, w:3, h:2, visible:false, m:9 },
 };
 const TILE_META = {
@@ -728,6 +781,9 @@ export default function WallPanel() {
       `→ ${mini.attributes.temperature ?? "?"}°`]);
     return rows;
   }, [entities]);
+
+  // Live weather (HA weather entity via /api/weather, 10-min refresh)
+  const wx = useWeather();
 
   const [floorView, setFloorView] = useState(0);
   // Panel Tasks tile = read-only summary of the To-Do list. Managed on the
@@ -1052,10 +1108,26 @@ export default function WallPanel() {
   // ---- grid geometry ----
   const gridRef = useRef();
   const camSaveRef = useRef(null);
-  // Panel text size: zoom applied to the tile areas; persists with layout
-  const textScale = layout.clock?.textScale ?? 1;
-  const bumpText = (d) => setLayout(prev => ({ ...prev,
-    clock: { ...prev.clock, textScale: Math.min(1.3, Math.max(0.85, +(((prev.clock?.textScale ?? 1) + d)).toFixed(2))) } }));
+  // Panel text size: zoom applied to the tile areas. PER-DEVICE by design —
+  // stored in localStorage, NOT in the server layout, so a phone can run
+  // 130% without blowing up the kitchen wall panel. (Migrates a value the
+  // old shared-layout version may have left behind.)
+  const TEXT_KEY = "fk.panel.textscale";
+  const [textScale, setTextScale] = useState(() => {
+    if (typeof window === "undefined") return 1;
+    try {
+      const s = parseFloat(localStorage.getItem(TEXT_KEY) ?? "");
+      if (!Number.isNaN(s)) return Math.min(1.5, Math.max(0.8, s));
+      const legacy = JSON.parse(localStorage.getItem(LS_KEY) ?? "{}")?.clock?.textScale;
+      if (typeof legacy === "number") return Math.min(1.5, Math.max(0.8, legacy));
+    } catch {}
+    return 1;
+  });
+  const bumpText = (d) => setTextScale(prev => {
+    const next = Math.min(1.5, Math.max(0.8, +(prev + d).toFixed(2)));
+    try { localStorage.setItem(TEXT_KEY, String(next)); } catch {}
+    return next;
+  });
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
@@ -1069,16 +1141,15 @@ export default function WallPanel() {
     const ro = new ResizeObserver(() => setGridSize({ w:el.clientWidth, h:el.clientHeight }));
     ro.observe(el); return () => ro.disconnect();
   }, []);
-  // Geometry: row 0 is a fixed compact strip (the clock); rows 1..6 divide
-  // the remaining grid height evenly, so the whole layout always fits the
-  // viewport with no dead band under the clock and nothing below the fold.
-  const ROW0_H = 72;
-  const UNIT_ROWS = 6;
+  // Geometry: 7 uniform rows dividing the grid height evenly, so every
+  // h:1 tile — clock, weather, anything — is exactly the same height and
+  // the whole layout still fits the viewport with nothing below the fold.
+  const UNIT_ROWS = 7;
   const cellW = gridSize.w / GRID_COLS;
-  const unitH = Math.max(80, (gridSize.h - ROW0_H) / UNIT_ROWS);
+  const unitH = Math.max(76, gridSize.h / UNIT_ROWS);
   const GAP = 12;
-  const rowTop = (y) => (y === 0 ? 0 : ROW0_H + (y - 1) * unitH);
-  const rowSpanH = (y, h) => (y === 0 ? ROW0_H + Math.max(0, h - 1) * unitH : h * unitH);
+  const rowTop = (y) => y * unitH;
+  const rowSpanH = (y, h) => h * unitH;
 
   const tileStyle = (l) => ({
     position:"absolute",
@@ -1108,10 +1179,10 @@ export default function WallPanel() {
       const l = { ...prev[id] };
       if (mode.current === "move") {
         l.x = Math.max(0, Math.min(GRID_COLS - l.w, start.current.x + dx));
-        l.y = Math.max(0, Math.min(1 + UNIT_ROWS - l.h, start.current.y + dy));
+        l.y = Math.max(0, Math.min(UNIT_ROWS - l.h, start.current.y + dy));
       } else {
         l.w = Math.max(1, Math.min(GRID_COLS - l.x, start.current.w + dx));
-        l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, start.current.h + dy));
+        l.h = Math.max(1, Math.min(UNIT_ROWS - l.y, start.current.h + dy));
       }
       return { ...prev, [id]: l };
     });
@@ -1126,43 +1197,14 @@ export default function WallPanel() {
   const resetLayout = () => setLayout(DEFAULT_LAYOUT);
 
   // ---- tile content ----
+  const wxIconEl = (cond, size) => {
+    const Ic = condIcon(cond);
+    return <Ic size={size} color={condColor(cond)} style={{flexShrink:0}}/>;
+  };
   const tileContent = {
     clock: (
-      <div style={{ position:"relative", display:"flex", gap:12, height:"100%", alignItems:"stretch" }}>
-        <ClockStrip compact={!isMobile} extra={isMobile ? (
-          <div style={{display:"flex", alignItems:"center", gap:10, marginLeft:"auto", minWidth:0}}>
-            <Sun size={20} color={C.motion} style={{flexShrink:0}}/>
-            <span style={{fontSize:20, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
-            <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
-              style={{ display:"flex", alignItems:"center", flexShrink:0, background:C.cardHi, color:C.sub,
-                border:`1px solid ${C.edge}`, borderRadius:9, padding:"6px 9px", cursor:"pointer" }}>
-              <Radar size={13}/>
-            </button>
-          </div>
-        ) : null}/>
-        {!isMobile && (
-        <div style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", gap:14,
-          padding:"0 20px", background:C.card, border:`1px solid ${C.edge}`, borderRadius:16 }}>
-          <Sun size={34} color={C.motion} style={{flexShrink:0}}/>
-          <span style={{fontSize:34, fontWeight:800, lineHeight:1, flexShrink:0, fontVariantNumeric:"tabular-nums"}}>72°</span>
-          <span style={{fontSize:16, fontWeight:600, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>
-          <div style={{display:"flex", gap:16, overflow:"hidden", marginLeft:"auto"}}>
-            {FORECAST.map(([t,tp,Ic],i)=>(
-              <div key={i} style={{display:"flex", alignItems:"center", gap:5, flexShrink:0}}>
-                <span style={{fontSize:13, color:C.sub}}>{t}</span>
-                <Ic size={17} color={i>3?C.sub:C.motion}/>
-                <span style={{fontSize:16, fontWeight:700}}>{tp}</span>
-              </div>
-            ))}
-          </div>
-          <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
-            style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0,
-              background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
-              padding:"7px 11px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-            <Radar size={13}/> Radar
-          </button>
-        </div>
-        )}
+      <div style={{ position:"relative", height:"100%" }}>
+        <ClockStrip />
         {edit && <button onClick={()=>setVisible("clock",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer", zIndex:2}}><EyeOff size={15}/></button>}
       </div>
     ),
@@ -1197,29 +1239,56 @@ export default function WallPanel() {
       </Tile>
     ),
     weather: (
-      <Tile title="Weather" edit={edit} onToggleVisible={()=>setVisible("weather",false)}>
-        {/* one-line weather: everything on a single row */}
-        <div style={{display:"flex", alignItems:"center", gap:14, height:"100%", minWidth:0}}>
-          <Sun size={30} color={C.motion} style={{flexShrink:0}}/>
-          <span style={{fontSize:28, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
-          <span style={{fontSize:12, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>
-          <div style={{display:"flex", gap:12, marginLeft:"auto", overflow:"hidden"}}>
-            {FORECAST.map(([t,tp,Ic],i)=>(
-              <div key={i} style={{display:"flex", alignItems:"center", gap:4, flexShrink:0}}>
-                <span style={{fontSize:10, color:C.sub}}>{t}</span>
-                <Ic size={13} color={i>3?C.sub:C.motion}/>
-                <span style={{fontSize:12, fontWeight:700}}>{tp}</span>
-              </div>
-            ))}
+      <div style={{ position:"relative", height:"100%", background:C.card, border:`1px solid ${C.edge}`,
+        borderRadius:16, padding:"10px 16px", boxSizing:"border-box", overflow:"hidden" }}>
+        {edit && <button onClick={()=>setVisible("weather",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer", zIndex:2}}><EyeOff size={15}/></button>}
+        {wx === null ? (
+          <div style={{display:"flex", alignItems:"center", height:"100%", fontSize:12, color:C.sub}}>Loading weather…</div>
+        ) : !wx.available ? (
+          <div style={{display:"flex", alignItems:"center", height:"100%", fontSize:12, color:C.sub, lineHeight:1.5}}>{wx.reason ?? "Weather unavailable."}</div>
+        ) : (
+          <div style={{display:"flex", alignItems:"center", gap:14, height:"100%", minWidth:0, flexWrap:"wrap", rowGap:6}}>
+            {wxIconEl(wx.condition, 30)}
+            <span style={{fontSize:28, fontWeight:800, lineHeight:1, flexShrink:0, fontVariantNumeric:"tabular-nums"}}>
+              {wx.temp != null ? `${wx.temp}°` : "–"}
+            </span>
+            <div style={{display:"flex", flexDirection:"column", gap:2, flexShrink:0}}>
+              <span style={{fontSize:12, fontWeight:600, color:C.text}}>{condText(wx.condition)}</span>
+              <span style={{fontSize:11, color:C.sub}}>
+                {wx.hi != null && wx.lo != null ? `H${wx.hi}/L${wx.lo}` : wx.humidity != null ? `${wx.humidity}% hum` : ""}
+              </span>
+            </div>
+            {wx.precip != null && (
+              <span title="Chance of rain today"
+                style={{display:"flex", alignItems:"center", gap:5, flexShrink:0, background:"rgba(107,138,253,0.12)",
+                  border:`1px solid ${C.accent}55`, borderRadius:999, padding:"4px 10px"}}>
+                <Droplets size={13} color={C.accent}/>
+                <span style={{fontSize:13, fontWeight:800, color:C.accent}}>{wx.precip}%</span>
+              </span>
+            )}
+            <div style={{display:"flex", gap:12, marginLeft:"auto", overflow:"hidden"}}>
+              {(wx.hourly ?? []).slice(0, 6).map((f, i)=>(
+                <div key={i} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:1, flexShrink:0, minWidth:34}}>
+                  <span style={{fontSize:10, color:C.sub}}>{hourLabel(f.time)}</span>
+                  <div style={{display:"flex", alignItems:"center", gap:3}}>
+                    {wxIconEl(f.condition, 13)}
+                    <span style={{fontSize:12, fontWeight:700}}>{f.temp != null ? `${f.temp}°` : "–"}</span>
+                  </div>
+                  <span style={{fontSize:9.5, fontWeight:700, color: (f.precip ?? 0) >= 40 ? C.accent : C.subDim, fontVariantNumeric:"tabular-nums"}}>
+                    {f.precip != null ? `${f.precip}%` : " "}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
+              style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0,
+                background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
+                padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+              <Radar size={13}/> Radar
+            </button>
           </div>
-          <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
-            style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0,
-              background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
-              padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-            <Radar size={13}/> Radar
-          </button>
-        </div>
-      </Tile>
+        )}
+      </div>
     ),
     radar: (
       <Tile title="Radar" edit={edit} onToggleVisible={()=>setVisible("radar",false)}>
@@ -1467,9 +1536,10 @@ export default function WallPanel() {
 
   const hiddenTiles = Object.keys(layout).filter(id => !layout[id].visible);
 
-  return (
+  return (<>
+    <TopMenu />
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
-      minHeight: "100dvh",
+      minHeight: "calc(100dvh - var(--fk-menu-h, 0px))",
       width: "100%", maxWidth:"100%",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
       padding: "12px",
@@ -1480,7 +1550,6 @@ export default function WallPanel() {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8,
         background:C.card, border:`1px solid ${allSecure?C.edge:C.open}`, borderRadius:16, padding: isMobile ? "10px 14px" : "12px 18px", marginBottom:12, flexShrink:0 }}>
         <div style={{display:"flex", alignItems:"center", gap:isMobile?9:14, flexWrap:"wrap"}}>
-          {!isMobile && <PanelNav inline />}
           <span style={{width:11,height:11,borderRadius:11, background: allSecure?C.secure:C.open, boxShadow:`0 0 10px ${allSecure?C.secure:C.open}`}}/>
           <span style={{fontSize:isMobile?16:20, fontWeight:800}}>{allSecure?"All Secure":`${summary.open} Open`}</span>
           <span style={{fontSize:isMobile?11:13, color:C.sub}}>
@@ -1505,10 +1574,11 @@ export default function WallPanel() {
           </button>
         )}
         {isMobile ? (<>
-          {arrange && (<>
-            <button onClick={()=>bumpText(-0.05)} aria-label="Smaller text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>A−</button>
-            <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:800, cursor:"pointer" }}>A+</button>
-          </>)}
+          {/* text size lives in the header on phones (per-device zoom) —
+              it was buried inside Arrange mode where nobody found it */}
+          <button onClick={()=>bumpText(-0.05)} aria-label="Smaller text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>A−</button>
+          {arrange && <span style={{fontSize:11, color:C.sub, minWidth:32, textAlign:"center"}}>{Math.round(textScale*100)}%</span>}
+          <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:800, cursor:"pointer" }}>A+</button>
           <button onClick={()=>setArrange(a=>!a)} aria-label="Arrange cards"
             style={{ display:"flex", alignItems:"center", gap:6, background: arrange?C.accent:C.cardHi, color: arrange?C.bg0:C.sub, border:`1px solid ${arrange?C.accent:C.edge}`, borderRadius:10, padding:"8px 11px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
             <Settings2 size={14}/>{arrange?"Done":"Arrange"}
@@ -1570,7 +1640,7 @@ export default function WallPanel() {
       </div>
 
       <div ref={gridRef} className="panel-grid-desktop" style={{ position:"relative", zoom: textScale,
-        minHeight:`calc((100dvh - 90px) / ${textScale})`,
+        minHeight:`calc((100dvh - var(--fk-menu-h, 0px) - 90px) / ${textScale})`,
         background: edit ? `repeating-linear-gradient(0deg, transparent, transparent ${unitH-1}px, rgba(107,138,253,0.06) ${unitH}px), repeating-linear-gradient(90deg, transparent, transparent ${cellW-1}px, rgba(107,138,253,0.06) ${cellW}px)` : "none",
         borderRadius:12 }}>
         {Object.keys(layout).filter(id => layout[id].visible).map(id => {
@@ -1651,5 +1721,5 @@ export default function WallPanel() {
       <BottomTabs/>
       <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>
-  );
+  </>);
 }

@@ -158,3 +158,89 @@ async def extract_schedule(db: AsyncSession, image_bytes: bytes, mime: str) -> l
             "category": cat if cat in valid_cats else "general",
         })
     return out
+
+
+_RECIPE_PROMPT = """You are reading a photo of a recipe (cookbook page, recipe card, \
+magazine clipping, handwritten card, or a screenshot). Extract ONE recipe.
+
+Return ONLY a JSON object, no prose, no markdown fences:
+{
+  "title": "recipe name",
+  "category": "one short word/phrase, e.g. Dinner, Dessert, Soup, Grill (empty if unclear)",
+  "servings": "e.g. '4' or '6-8' (empty if not shown)",
+  "prep_time": "total/prep time as shown, e.g. '45 min' (empty if not shown)",
+  "ingredients": ["one ingredient per array item, keep quantities, e.g. '2 cups flour'"],
+  "steps": ["one step per array item, in order, without leading numbers"],
+  "notes": "yield/temperature notes, tips, or source attribution (empty if none)"
+}
+
+Rules:
+- Keep the recipe's own wording; fix obvious OCR garbles only.
+- Merge wrapped lines: an ingredient or step split across lines is ONE item.
+- Strip step numbers and bullet characters — ordering is the array order.
+- If the photo shows multiple recipes, extract the most prominent one and \
+mention the others in "notes".
+- If no recipe is readable, return {"title": ""}.
+"""
+
+
+async def extract_recipe(db: AsyncSession, image_bytes: bytes, mime: str) -> dict:
+    """Send a recipe photo to Gemini, get back one parsed recipe.
+
+    Returns an UNSAVED candidate shaped like RecipeIn (ingredients/steps as
+    newline-joined strings) for the review/edit screen; the caller saves it
+    through the normal POST /api/recipes after the user confirms.
+    """
+    key = _dec(await _get(db, K_GEMINI_KEY))
+    if not key:
+        raise ValueError("no Gemini key set — add one in Admin → Settings")
+    model = (await _get(db, K_GEMINI_MODEL)) or DEFAULT_GEMINI_MODEL
+
+    body = {
+        "contents": [{
+            "parts": [
+                {"text": _RECIPE_PROMPT},
+                {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_bytes).decode("ascii")}},
+            ]
+        }],
+        "generationConfig": {"temperature": 0, "response_mime_type": "application/json"},
+    }
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(
+            f"{GEMINI_BASE}/models/{model}:generateContent",
+            params={"key": key}, json=body,
+        )
+        if r.status_code == 400 and "API_KEY" in r.text:
+            raise ValueError("Gemini rejected the API key")
+        r.raise_for_status()
+        data = r.json()
+
+    try:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        raise ValueError("Gemini returned no readable content")
+
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1].lstrip("json").strip() if "```" in text[3:] else text.strip("`")
+    try:
+        it = json.loads(text)
+    except json.JSONDecodeError:
+        raise ValueError("could not parse the recipe — try a clearer photo")
+    if not isinstance(it, dict) or not str(it.get("title", "")).strip():
+        raise ValueError("no recipe found in that photo — try a closer, clearer shot")
+
+    def _lines(v) -> str:
+        if isinstance(v, list):
+            return "\n".join(str(x).strip() for x in v if str(x).strip())
+        return str(v or "").strip()
+
+    return {
+        "title": str(it.get("title", "")).strip()[:160],
+        "category": str(it.get("category", "")).strip()[:40],
+        "servings": str(it.get("servings", "")).strip()[:40],
+        "prep_time": str(it.get("prep_time", "")).strip()[:40],
+        "ingredients": _lines(it.get("ingredients"))[:8000],
+        "steps": _lines(it.get("steps"))[:16000],
+        "notes": _lines(it.get("notes"))[:4000],
+    }

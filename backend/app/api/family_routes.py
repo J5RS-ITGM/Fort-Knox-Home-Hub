@@ -627,7 +627,37 @@ async def list_recipes(db: AsyncSession = Depends(get_session)) -> list[dict]:
     rows = (await db.execute(select(models.Recipe).order_by(models.Recipe.title))).scalars().all()
     return [{"id": r.id, "title": r.title, "category": r.category, "servings": r.servings,
              "prep_time": r.prep_time, "ingredients": r.ingredients, "steps": r.steps,
-             "notes": r.notes} for r in rows]
+             "notes": r.notes,
+             "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
+
+
+# Recipe photo -> one parsed recipe (Gemini, same encrypted-key vault as the
+# schedule import). Returns an UNSAVED candidate for the review screen; the
+# user confirms/edits and it saves through the normal POST /api/recipes.
+@router.post("/recipes/extract")
+async def extract_recipe_photo(
+    file: UploadFile,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    from .. import ai_providers
+
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to import recipes")
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/heic"}
+    if (file.content_type or "") not in allowed:
+        raise HTTPException(422, "upload a JPEG, PNG, WebP, or HEIC photo")
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(413, "photo too large (15MB max)")
+    try:
+        recipe = await ai_providers.extract_recipe(db, data, file.content_type)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"extraction failed: {e}") from e
+    await audit(db, user.username, "recipe_extracted", f"{recipe['title']} from {file.filename}")
+    return {"recipe": recipe}
 
 
 @router.post("/recipes", status_code=201)

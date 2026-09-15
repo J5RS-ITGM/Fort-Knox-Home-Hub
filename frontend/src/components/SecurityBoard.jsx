@@ -7,7 +7,7 @@ import { useHomeHub } from "@/lib/useHomeHub";
 import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
-import PanelNav from "@/components/PanelNav";
+import TopMenu from "@/components/TopMenu";
 import {
   PLAN_URL, PLAN_JSON_URL, PLAN_W, PLAN_H,
   planFromGrid, gridFromPlan, gridRect,
@@ -1291,7 +1291,6 @@ export default function SecurityBoard() {
         )}
         {saveNote && <span style={{fontSize:11, color:C.accent, whiteSpace:"nowrap"}}>{saveNote}</span>}
         <AlarmStatus state={alarmState} command={command}/>
-        <span style={{marginLeft:4}}><PanelNav inline/></span>
       </div>
       <div style={{display:"flex", gap:8, alignItems:"center"}}>
         {edit && (<>
@@ -1308,7 +1307,7 @@ export default function SecurityBoard() {
   const shell = {
     fontFamily:"'DM Sans', system-ui, sans-serif",
     background:`radial-gradient(1200px 800px at 70% -10%, ${C.bg1}, ${C.bg0})`,
-    color:C.text, height:`calc(100dvh - ${BOTTOM_TABS_HEIGHT}px - env(safe-area-inset-bottom))`, display:"flex", flexDirection:"column", overflow:"hidden",
+    color:C.text, height:`calc(100dvh - var(--fk-menu-h, 0px) - ${BOTTOM_TABS_HEIGHT}px - env(safe-area-inset-bottom))`, display:"flex", flexDirection:"column", overflow:"hidden",
   };
 
   const loading = placements === null;
@@ -1395,7 +1394,8 @@ export default function SecurityBoard() {
 
   // ---------------- MOBILE: stacked, scrollable ----------------
   if (narrow) {
-    return (
+    return (<>
+      <TopMenu />
       <div style={shell}>
         {header}
         <div style={{flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch"}}>
@@ -1413,11 +1413,12 @@ export default function SecurityBoard() {
           </div>
         </div>
       </div>
-    );
+    </>);
   }
 
   // ---------------- WIDE: side-by-side kitchen panel ----------------
-  return (
+  return (<>
+    <TopMenu />
     <div style={shell}>
       {header}
       <div style={{flex:1, display:"flex", minHeight:0}}>
@@ -1436,7 +1437,7 @@ export default function SecurityBoard() {
         </div>
       </div>
     </div>
-  );
+  </>);
 }
 
 function Pill({active,onClick,label,tone,busy}) {

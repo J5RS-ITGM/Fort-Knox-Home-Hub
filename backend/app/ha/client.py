@@ -114,3 +114,27 @@ class HAClient:
                 json=payload,
             )
             resp.raise_for_status()
+
+    async def get_forecasts(self, entity_id: str, forecast_type: str) -> list[dict[str, Any]]:
+        """Fetch a forecast list from a weather entity via
+        weather.get_forecasts (?return_response). HA is the weather source
+        of truth — the app never talks to a weather service directly.
+
+        forecast_type: "hourly" | "daily" | "twice_daily" (per integration).
+        Returns [] rather than raising for shape surprises so the weather
+        tile degrades to current-conditions-only instead of erroring.
+        """
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{self.url}/api/services/weather/get_forecasts",
+                params={"return_response": ""},
+                headers={"Authorization": f"Bearer {self.token}"},
+                json={"entity_id": entity_id, "type": forecast_type},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        # REST shape: {"changed_states": [...], "service_response": {eid: {"forecast": [...]}}}
+        svc = data.get("service_response", data) if isinstance(data, dict) else {}
+        ent = svc.get(entity_id, {}) if isinstance(svc, dict) else {}
+        fc = ent.get("forecast", []) if isinstance(ent, dict) else []
+        return fc if isinstance(fc, list) else []

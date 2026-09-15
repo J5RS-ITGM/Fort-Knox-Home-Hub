@@ -203,6 +203,105 @@ async def export_sensors(session: AsyncSession = Depends(get_session)) -> Respon
     )
 
 
+# -- weather (HA weather entity via the bridge) -------------------------------
+# HA is the source of truth (architecture rule #1): current conditions come
+# from the weather.* entity's live attributes in the state cache; the hourly/
+# daily forecast (incl. precipitation probability) is fetched through the
+# bridge with weather.get_forecasts. No direct weather-service egress from
+# this app. Entity: app_settings["weather_entity"] override, else the first
+# weather.* entity HA exposes. Forecasts cached 10 min per entity.
+_weather_cache: dict = {"at": 0.0, "entity": "", "hourly": [], "daily": []}
+
+
+def _weather_entity_pick(setting: str | None):
+    if setting:
+        ent = cache.get(setting)
+        if ent:
+            return ent
+    for e in cache.snapshot():
+        if e.domain == "weather":
+            return e
+    return None
+
+
+@protected.get("/weather")
+async def weather(session: AsyncSession = Depends(get_session)) -> dict:
+    import time as _t
+    from datetime import datetime as _dt
+
+    row = await session.get(models.AppSetting, "weather_entity")
+    ent = _weather_entity_pick(row.value.strip() if row and row.value else None)
+    if ent is None:
+        return {"available": False,
+                "reason": "No weather entity found — add a weather integration in Home Assistant "
+                          "(Met.no or NWS), or set weather_entity in Admin → Settings."}
+
+    now = _t.monotonic()
+    if (_weather_cache["entity"] != ent.entity_id) or (now - _weather_cache["at"] > 600):
+        hourly: list = []
+        daily: list = []
+        bridge = manager.bridge
+        if bridge is not None and hasattr(bridge, "get_forecasts"):
+            try:
+                hourly = await bridge.get_forecasts(ent.entity_id, "hourly")
+            except Exception:  # noqa: BLE001 — forecast is best-effort
+                hourly = []
+            try:
+                daily = await bridge.get_forecasts(ent.entity_id, "daily")
+            except Exception:  # noqa: BLE001
+                daily = []
+        _weather_cache.update(at=now, entity=ent.entity_id, hourly=hourly, daily=daily)
+    hourly = _weather_cache["hourly"]
+    daily = _weather_cache["daily"]
+
+    def _num(v):
+        try:
+            return round(float(v))
+        except (TypeError, ValueError):
+            return None
+
+    a = ent.attributes
+    temp = _num(a.get("temperature"))
+    today = daily[0] if daily else {}
+    hi = _num(today.get("temperature"))
+    lo = _num(today.get("templow"))
+    if hi is None and hourly:
+        hi = max((x for x in (_num(f.get("temperature")) for f in hourly[:24]) if x is not None), default=None)
+    if lo is None and hourly:
+        lo = min((x for x in (_num(f.get("temperature")) for f in hourly[:24]) if x is not None), default=None)
+    # today's rain %: the daily figure when the integration provides one,
+    # else the worst hour in the next 12
+    precip = _num(today.get("precipitation_probability"))
+    if precip is None:
+        precip = max((x for x in (_num(f.get("precipitation_probability")) for f in hourly[:12]) if x is not None),
+                     default=None)
+
+    hourly_out = []
+    for f in hourly[:8]:
+        try:
+            when = _dt.fromisoformat(str(f.get("datetime")).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            when = None
+        hourly_out.append({
+            "time": when.isoformat() if when else None,
+            "temp": _num(f.get("temperature")),
+            "condition": str(f.get("condition") or ""),
+            "precip": _num(f.get("precipitation_probability")),
+        })
+
+    return {
+        "available": True,
+        "entity": ent.entity_id,
+        "condition": ent.state,
+        "temp": temp,
+        "humidity": _num(a.get("humidity")),
+        "hi": hi,
+        "lo": lo,
+        "precip": precip,
+        "hourly": hourly_out,
+    }
+
+
 # -- weather radar (RainViewer proxy) ----------------------------------------
 # RainViewer is an explicitly approved external dependency (see CLAUDE.md).
 # Proxied through the backend so clients — wall panels on default-deny

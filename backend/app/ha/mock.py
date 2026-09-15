@@ -105,6 +105,12 @@ SEED: list[dict[str, Any]] = [
     # Environment
     {"entity_id": "sensor.basement_humidity", "state": "48",
      "attributes": {"friendly_name": "Basement Humidity", "unit_of_measurement": "%"}},
+    # Weather — mirrors an HA weather integration (Met.no / NWS style) so
+    # the panel weather tile is fully testable in mock mode. State is the
+    # condition; forecasts come from MockHA.get_forecasts().
+    {"entity_id": "weather.home", "state": "partlycloudy",
+     "attributes": {"friendly_name": "Home Weather", "temperature": 72, "humidity": 46,
+                    "temperature_unit": "°F", "wind_speed": 8.5}},
 ]
 
 
@@ -234,3 +240,37 @@ class MockHA:
             attrs.update({k: v for k, v in data.items() if k in ("temperature", "target_temp_low", "target_temp_high")})
 
         await cache.apply(Entity(entity_id, state, attrs))
+
+    async def get_forecasts(self, entity_id: str, forecast_type: str) -> list[dict[str, Any]]:
+        """Synthetic forecast matching HA's weather.get_forecasts shape,
+        so the weather tile (incl. precipitation %) demos in mock mode."""
+        from datetime import timedelta
+
+        now = _now()
+        if forecast_type == "daily":
+            out = []
+            for d in range(4):
+                day = now + timedelta(days=d)
+                out.append({
+                    "datetime": day.isoformat(),
+                    "condition": ["partlycloudy", "sunny", "rainy", "cloudy"][d % 4],
+                    "temperature": 76 - d,          # daytime high
+                    "templow": 61 - d,              # overnight low
+                    "precipitation_probability": [20, 5, 65, 35][d % 4],
+                })
+            return out
+        # hourly: gentle temp curve, rain chance ramping through the afternoon
+        out = []
+        for h in range(1, 13):
+            t = now + timedelta(hours=h)
+            hour = t.hour
+            temp = 72 + (4 - abs(14 - hour) // 2)   # peaks mid-afternoon
+            precip = max(0, min(70, (h - 3) * 10))  # dry now, chance builds
+            cond = "sunny" if precip < 20 else "partlycloudy" if precip < 45 else "rainy"
+            out.append({
+                "datetime": t.isoformat(),
+                "condition": cond,
+                "temperature": temp,
+                "precipitation_probability": precip,
+            })
+        return out
