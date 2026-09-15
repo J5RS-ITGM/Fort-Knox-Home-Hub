@@ -511,7 +511,7 @@ const SCENES = [ ["Morning",Sun], ["Movie",Play], ["Away",Lock], ["Night",Moon] 
 const FORECAST = [ ["Now","72°",Sun], ["1p","75°",Sun], ["2p","76°",Sun], ["3p","74°",Cloud], ["4p","71°",Cloud], ["5p","68°",Droplets] ];
 
 // ================= CLOCK =====================
-function ClockStrip({ extra }) {
+function ClockStrip({ extra, compact }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -521,7 +521,8 @@ function ClockStrip({ extra }) {
   const secs = now.toLocaleTimeString([], { second: "2-digit" }).padStart(2, "0");
   const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   return (
-    <div style={{ width:"100%", minHeight:"100%", display:"flex", alignItems:"center", gap:14, flexWrap:"wrap",
+    <div style={{ width: compact ? "auto" : "100%", minHeight:"100%", display:"flex", alignItems:"center",
+                  gap:14, flexWrap: compact ? "nowrap" : "wrap", flexShrink:0,
                   padding:"16px 20px", boxSizing:"border-box",
                   background:C.card, border:`1px solid ${C.edge}`, borderRadius:16 }}>
       <span style={{ fontSize:34, fontWeight:800, color:C.text, fontVariantNumeric:"tabular-nums", lineHeight:1 }}>{time}</span>
@@ -1127,31 +1128,41 @@ export default function WallPanel() {
   // ---- tile content ----
   const tileContent = {
     clock: (
-      <div style={{ position:"relative" }}>
-        <ClockStrip extra={
-          <div style={{display:"flex", alignItems:"center", gap:12, marginLeft:"auto", minWidth:0}}>
-            <Sun size={22} color={C.motion} style={{flexShrink:0}}/>
-            <span style={{fontSize:22, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
-            {!isMobile && <span style={{fontSize:12, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>}
-            {!isMobile && (
-              <div style={{display:"flex", gap:11, overflow:"hidden"}}>
-                {FORECAST.map(([t,tp,Ic],i)=>(
-                  <div key={i} style={{display:"flex", alignItems:"center", gap:3, flexShrink:0}}>
-                    <span style={{fontSize:10, color:C.sub}}>{t}</span>
-                    <Ic size={12} color={i>3?C.sub:C.motion}/>
-                    <span style={{fontSize:12, fontWeight:700}}>{tp}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+      <div style={{ position:"relative", display:"flex", gap:12, height:"100%", alignItems:"stretch" }}>
+        <ClockStrip compact={!isMobile} extra={isMobile ? (
+          <div style={{display:"flex", alignItems:"center", gap:10, marginLeft:"auto", minWidth:0}}>
+            <Sun size={20} color={C.motion} style={{flexShrink:0}}/>
+            <span style={{fontSize:20, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
             <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
-              style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0,
-                background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
-                padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-              <Radar size={13}/>{!isMobile ? " Radar" : ""}
+              style={{ display:"flex", alignItems:"center", flexShrink:0, background:C.cardHi, color:C.sub,
+                border:`1px solid ${C.edge}`, borderRadius:9, padding:"6px 9px", cursor:"pointer" }}>
+              <Radar size={13}/>
             </button>
           </div>
-        }/>
+        ) : null}/>
+        {!isMobile && (
+        <div style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", gap:14,
+          padding:"0 20px", background:C.card, border:`1px solid ${C.edge}`, borderRadius:16 }}>
+          <Sun size={26} color={C.motion} style={{flexShrink:0}}/>
+          <span style={{fontSize:24, fontWeight:800, lineHeight:1, flexShrink:0}}>72°</span>
+          <span style={{fontSize:12, color:C.sub, flexShrink:0}}>Sunny · H76/L61</span>
+          <div style={{display:"flex", gap:14, overflow:"hidden", marginLeft:"auto"}}>
+            {FORECAST.map(([t,tp,Ic],i)=>(
+              <div key={i} style={{display:"flex", alignItems:"center", gap:4, flexShrink:0}}>
+                <span style={{fontSize:11, color:C.sub}}>{t}</span>
+                <Ic size={13} color={i>3?C.sub:C.motion}/>
+                <span style={{fontSize:13, fontWeight:700}}>{tp}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
+            style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0,
+              background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
+              padding:"7px 11px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+            <Radar size={13}/> Radar
+          </button>
+        </div>
+        )}
         {edit && <button onClick={()=>setVisible("clock",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer", zIndex:2}}><EyeOff size={15}/></button>}
       </div>
     ),
