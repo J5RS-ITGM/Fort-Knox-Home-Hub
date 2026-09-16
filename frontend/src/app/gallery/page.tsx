@@ -1,10 +1,13 @@
 "use client";
 
-/** Family gallery v1 — photos stored on the server (Docker volume),
- *  indexed in Postgres, served through the authed API. Upload from any
- *  signed-in device; groundwork for a wall-panel slideshow later. */
+/** Family gallery — photos stored on the server (Docker volume), indexed
+ *  in Postgres, served through the authed API. Upload from any signed-in
+ *  device. Play starts the frame mode: fullscreen shuffled slideshow that
+ *  crossfades through the gallery like an Aura frame (tap to exit; holds a
+ *  screen wake lock so the kiosk display stays on). */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Play } from "lucide-react";
 import PageShell from "@/components/PageShell";
 import { api, API_URL } from "@/lib/api";
 import { useMe , isKiosk } from "@/lib/auth";
@@ -17,6 +20,7 @@ export default function GalleryPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [uploading, setUploading] = useState(0); // count in flight
   const [view, setView] = useState<Photo | null>(null);
+  const [playing, setPlaying] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -50,6 +54,10 @@ export default function GalleryPage() {
   return (
     <PageShell title="Gallery" active="/gallery">
       <div className="mb-4 flex items-center gap-3">
+        <button onClick={() => setPlaying(true)} disabled={photos.length === 0}
+                className="flex items-center gap-2 rounded-md border border-lamp/60 bg-lamp/10 px-4 py-2 text-sm font-semibold text-lamp disabled:opacity-40">
+          <Play size={15} /> Play
+        </button>
         <button onClick={() => fileRef.current?.click()}
                 className="rounded-md border border-lamp/60 bg-lamp/10 px-4 py-2 text-sm font-semibold text-lamp">
           {uploading ? `Uploading ${uploading}…` : "＋ Add photos"}
@@ -91,6 +99,75 @@ export default function GalleryPage() {
           </div>
         </div>
       )}
+
+      {playing && <Slideshow photos={photos} onClose={() => setPlaying(false)} />}
     </PageShell>
+  );
+}
+
+const SLIDE_MS = 9000;  // time each photo holds
+const FADE_MS = 1200;   // crossfade duration
+
+/** Frame mode: fullscreen shuffled slideshow, Aura-frame style. The next
+ *  image is preloaded and crossfaded over the current one; tapping
+ *  anywhere (or Esc) exits. While open it requests a screen wake lock so
+ *  a wall panel doesn't sleep mid-show. */
+function Slideshow({ photos, onClose }: { photos: Photo[]; onClose: () => void }) {
+  const [order] = useState<Photo[]>(() => {
+    const a = [...photos];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  });
+  const [idx, setIdx] = useState(0);
+  const url = (p: Photo) => `${API_URL}/api/photos/${p.id}/file`;
+
+  // advance on a timer
+  useEffect(() => {
+    if (order.length < 2) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % order.length), SLIDE_MS);
+    return () => clearInterval(t);
+  }, [order.length]);
+
+  // preload the image after next so the crossfade never pops in raw
+  useEffect(() => {
+    const nxt = order[(idx + 2) % order.length];
+    if (nxt) { const im = new window.Image(); im.src = url(nxt); }
+  }, [idx, order]);
+
+  // Esc exits
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // keep the display awake while the frame runs (best-effort)
+  useEffect(() => {
+    let lock: { release: () => Promise<void> } | null = null;
+    const nav = navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } };
+    nav.wakeLock?.request("screen").then((l) => { lock = l; }).catch(() => {});
+    return () => { void lock?.release().catch(() => {}); };
+  }, []);
+
+  const cur = order[idx];
+  const nxt = order[(idx + 1) % order.length];
+  return (
+    <div className="fixed inset-0 z-[90] cursor-pointer bg-black" onClick={onClose} role="button" aria-label="Exit slideshow">
+      {/* two stacked layers: the incoming photo fades in over the current one */}
+      {nxt && order.length > 1 && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url(nxt)} alt="" className="absolute inset-0 size-full object-contain" />
+      )}
+      {cur && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={cur.id + String(idx)} src={url(cur)} alt=""
+             className="absolute inset-0 size-full object-contain"
+             style={order.length > 1 ? { animation: `hh-slidehold ${SLIDE_MS}ms linear forwards` } : undefined} />
+      )}
+      <style>{`@keyframes hh-slidehold{0%{opacity:1}${Math.round(((SLIDE_MS - FADE_MS) / SLIDE_MS) * 100)}%{opacity:1}100%{opacity:0}}`}</style>
+    </div>
   );
 }
