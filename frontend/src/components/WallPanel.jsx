@@ -13,6 +13,7 @@ import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
 import AppHeader from "@/components/AppHeader";
+import Slideshow from "@/components/Slideshow";
 import { isKiosk, useMe } from "@/lib/auth";
 import { useHomeHub } from "@/lib/useHomeHub";
 
@@ -625,7 +626,6 @@ function Tile({ title, children, edit, onToggleVisible, style, fit }) {
       {title && (
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
           <span style={{fontSize:11, fontWeight:700, letterSpacing:1.3, textTransform:"uppercase", color:C.sub}}>{title}</span>
-          {edit && <button onClick={onToggleVisible} style={{background:"none", border:"none", color:C.sub, cursor:"pointer", padding:2}}><EyeOff size={15}/></button>}
         </div>
       )}
       <div style={{flex:1, minHeight:0, overflow:"hidden"}}>{children}</div>
@@ -911,6 +911,15 @@ export default function WallPanel() {
 
   const [showRadar, setShowRadar] = useState(false);
   const [edit, setEdit] = useState(false);
+  // Gallery frame mode, launched straight from the panel: fetch the photo
+  // list on demand and hand it to the shared Slideshow overlay.
+  const [framePhotos, setFramePhotos] = useState(null); // null = closed
+  const openFrame = async () => {
+    try {
+      const r = await fetch(`${API_URL}/api/photos`, { credentials: "include" });
+      setFramePhotos(r.ok ? await r.json() : []);
+    } catch { setFramePhotos([]); }
+  };
   // Mobile "Arrange" mode: shows up/down controls on each stacked card.
   // (Touch drag in a scrolling stack is unreliable; arrows always work.)
   const [arrange, setArrange] = useState(false);
@@ -1162,7 +1171,7 @@ export default function WallPanel() {
 
   const tileStyle = (l) => ({
     position:"absolute",
-    left: l.x*cellW + GAP/2, top: rowTop(l.y) + GAP/2,
+    left: l.x*cellW + GAP/2, top: pxTop(l) + GAP/2,
     width: l.w*cellW - GAP,
     height: l.hp != null ? l.hp : rowSpanH(l.y, l.h) - GAP,
     transition: dragId.current ? "none" : "left .18s, top .18s, width .18s, height .18s",
@@ -1178,6 +1187,7 @@ export default function WallPanel() {
   const [resizeHint, setResizeHint] = useState(null); // {id, label} while resizing
   const [linkPick, setLinkPick] = useState(null);     // tile id waiting for its partner
   const pxHeight = (l) => (l.hp != null ? l.hp : rowSpanH(l.y, l.h) - GAP);
+  const pxTop = (l) => (l.yp != null ? l.yp : rowTop(l.y));
   const toggleLink = (id) => {
     const cur = layout[id]?.lockWith;
     if (cur) {
@@ -1218,7 +1228,8 @@ export default function WallPanel() {
     dragId.current = id; mode.current = m;
     const l = layout[id];
     start.current = { mx:e.clientX, my:e.clientY, x:l.x, y:l.y, w:l.w, h:l.h,
-                      ph: l.hp != null ? l.hp : rowSpanH(l.y, l.h) - GAP };
+                      ph: l.hp != null ? l.hp : rowSpanH(l.y, l.h) - GAP,
+                      pt: l.yp != null ? l.yp : rowTop(l.y) };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
   };
@@ -1230,7 +1241,29 @@ export default function WallPanel() {
       const l = { ...prev[id] };
       if (mode.current === "move") {
         l.x = Math.max(0, Math.min(GRID_COLS - l.w, start.current.x + dx));
-        l.y = Math.max(0, Math.min(1 + UNIT_ROWS - l.h, start.current.y + dy));
+        // Vertical movement is FREE (pixels), with magnetic snapping to the
+        // edges of other tiles so a tile slides flush under (or above, or
+        // top-aligned with) its neighbors — plus the row lines and the top.
+        const ownH = pxHeight(l);
+        let top = start.current.pt + (e.clientY - start.current.my);
+        const candidates = [0, ROW0_H];
+        for (const [oid, o] of Object.entries(prev)) {
+          if (oid === id || !o.visible) continue;
+          const oTop = o.yp != null ? o.yp : rowTop(o.y);
+          const oH = o.hp != null ? o.hp : rowSpanH(o.y, o.h) - GAP;
+          candidates.push(oTop);                 // align tops
+          candidates.push(oTop + oH + GAP);      // sit flush BELOW it
+          candidates.push(oTop - ownH - GAP);    // sit flush ABOVE it
+        }
+        let best = null;
+        for (const c of candidates) {
+          if (best === null || Math.abs(c - top) < Math.abs(best - top)) best = c;
+        }
+        if (best !== null && Math.abs(best - top) <= 14) top = best;
+        top = Math.max(0, Math.min(gridTotalH - ownH - GAP, Math.round(top)));
+        l.yp = top;
+        l.y = top < ROW0_H * 0.6 ? 0
+          : Math.max(1, Math.min(UNIT_ROWS, 1 + Math.round((top - ROW0_H) / unitH)));
       } else {
         l.w = Math.max(1, Math.min(GRID_COLS - l.x, start.current.w + dx));
         const maxPx = gridTotalH - rowTop(l.y) - GAP;
@@ -1274,7 +1307,6 @@ export default function WallPanel() {
     clock: (
       <div style={{ position:"relative", height:"100%" }}>
         <ClockStrip />
-        {edit && <button onClick={()=>setVisible("clock",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer", zIndex:2}}><EyeOff size={15}/></button>}
       </div>
     ),
     board: (
@@ -1288,7 +1320,6 @@ export default function WallPanel() {
           onToggleCamLock={()=>setLayout(prev=>({ ...prev, board:{ ...prev.board, camLocked: !prev.board?.camLocked } }))}
         /></div>
         <div style={{position:"absolute", top:14, left:16, fontSize:11, fontWeight:700, letterSpacing:1.3, textTransform:"uppercase", color:C.sub}}>Home Map</div>
-        {edit && <button onClick={()=>setVisible("board",false)} style={{position:"absolute", top:12, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer"}}><EyeOff size={15}/></button>}
         {/* floor tabs — stacked, below the title, clear of the legend */}
         {!edit && (
           <div style={{position:"absolute", top:40, left:12, display:"flex", flexDirection:"column", gap:6}}>
@@ -1310,18 +1341,6 @@ export default function WallPanel() {
     weather: (
       <div style={{ position:"relative", height:"100%", background:C.card, border:`1px solid ${C.edge}`,
         borderRadius:16, padding:"10px 16px", boxSizing:"border-box", overflow:"hidden" }}>
-        {edit && (
-          <div style={{position:"absolute", top:8, right:10, display:"flex", gap:6, zIndex:8}}>
-            <button onPointerDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation(); bumpWeatherText(-0.1);}}
-              aria-label="Smaller weather text"
-              style={{background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:7, padding:"3px 8px", fontSize:10, fontWeight:800, cursor:"pointer"}}>A−</button>
-            <span style={{fontSize:10, color:C.sub, alignSelf:"center"}}>{Math.round(wts*100)}%</span>
-            <button onPointerDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation(); bumpWeatherText(0.1);}}
-              aria-label="Larger weather text"
-              style={{background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:7, padding:"3px 8px", fontSize:12, fontWeight:800, cursor:"pointer"}}>A+</button>
-            <button onClick={()=>setVisible("weather",false)} style={{background:"none", border:"none", color:C.sub, cursor:"pointer"}}><EyeOff size={15}/></button>
-          </div>
-        )}
         {wx === null ? (
           <div style={{display:"flex", alignItems:"center", height:"100%", fontSize:12, color:C.sub}}>Loading weather…</div>
         ) : !wx.available ? (
@@ -1487,17 +1506,18 @@ export default function WallPanel() {
             return (
               <div key={l.entity_id} style={{display:"flex", alignItems:"center", gap:12, opacity: lockHidden ? 0.35 : 1}}>
                 {lockPicking && (
-                  <span style={{display:"flex", flexDirection:"column", gap:3, flexShrink:0}}>
-                    <button onClick={()=>toggleDeviceHidden(l.entity_id)} aria-label={lockHidden?"Show lock":"Hide lock"}
-                      style={{background:"transparent", border:`1px solid ${lockHidden?C.open:C.edge}`, borderRadius:6, padding:"3px 5px", cursor:"pointer"}}>
-                      {lockHidden ? <EyeOff size={12} color={C.open}/> : <Eye size={12} color={C.subDim}/>}
-                    </button>
-                    <span style={{display:"flex", gap:3}}>
-                      <button onClick={()=>moveWithin(locks.map(x=>x.entity_id), l.entity_id, -1)} aria-label="Move up"
-                        style={{background:"transparent", border:`1px solid ${C.edge}`, borderRadius:6, padding:"1px 6px", fontSize:11, color:C.sub, cursor:"pointer"}}>↑</button>
-                      <button onClick={()=>moveWithin(locks.map(x=>x.entity_id), l.entity_id, 1)} aria-label="Move down"
-                        style={{background:"transparent", border:`1px solid ${C.edge}`, borderRadius:6, padding:"1px 6px", fontSize:11, color:C.sub, cursor:"pointer"}}>↓</button>
-                    </span>
+                  <span style={{display:"flex", gap:3, flexShrink:0}} onPointerDown={(e)=>e.stopPropagation()}>
+                    {[
+                      [lockHidden ? <EyeOff key="i" size={11} color={C.open}/> : <Eye key="i" size={11} color={C.subDim}/>, ()=>toggleDeviceHidden(l.entity_id), lockHidden?"Show lock":"Hide lock", lockHidden],
+                      ["↑", ()=>moveWithin(locks.map(x=>x.entity_id), l.entity_id, -1), "Move up", false],
+                      ["↓", ()=>moveWithin(locks.map(x=>x.entity_id), l.entity_id, 1), "Move down", false],
+                    ].map(([face, fn, label, warn], i)=>(
+                      <button key={i} onClick={fn} aria-label={label}
+                        style={{width:20, height:20, display:"grid", placeItems:"center", background:"transparent",
+                          border:`1px solid ${warn?C.open:C.edge}`, borderRadius:5, fontSize:10, color:C.sub, cursor:"pointer", padding:0}}>
+                        {face}
+                      </button>
+                    ))}
                   </span>
                 )}
                 {/* Door-indicator convention (Eric's call): red = locked/no
@@ -1659,6 +1679,10 @@ export default function WallPanel() {
           <button onClick={()=>bumpText(-0.05)} aria-label="Smaller text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>A−</button>
           {arrange && <span style={{fontSize:11, color:C.sub, minWidth:32, textAlign:"center"}}>{Math.round(textScale*100)}%</span>}
           <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:800, cursor:"pointer" }}>A+</button>
+          <button onClick={()=>{ void openFrame(); }} aria-label="Play gallery slideshow"
+            style={{ display:"flex", alignItems:"center", background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 11px", cursor:"pointer" }}>
+            <Play size={14}/>
+          </button>
           <button onClick={()=>setArrange(a=>!a)} aria-label="Arrange cards"
             style={{ display:"flex", alignItems:"center", gap:6, background: arrange?C.accent:C.cardHi, color: arrange?C.bg0:C.sub, border:`1px solid ${arrange?C.accent:C.edge}`, borderRadius:10, padding:"8px 11px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
             <Settings2 size={14}/>{arrange?"Done":"Arrange"}
@@ -1670,6 +1694,10 @@ export default function WallPanel() {
               <span style={{fontSize:11, color:C.sub, minWidth:34, textAlign:"center"}}>{Math.round(textScale*100)}%</span>
               <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"9px 12px", fontSize:14, fontWeight:800, cursor:"pointer" }}>A+</button>
             </>)}
+            <button onClick={()=>{ void openFrame(); }} aria-label="Play gallery slideshow" title="Play the gallery like a photo frame"
+              style={{ display:"flex", alignItems:"center", gap:8, background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+              <Play size={16}/> Photos
+            </button>
             <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
               <Settings2 size={17}/>{edit?"Done":"Edit"}
             </button>
@@ -1733,19 +1761,34 @@ export default function WallPanel() {
                   outline: edit ? `1.5px ${linkPick === id ? "solid" : "dashed"} ${C.accent}` : "none", outlineOffset:2, borderRadius:16 }}>
                 {tileContent[id]}
                 {edit && (
-                  <button
-                    onPointerDown={(e)=>e.stopPropagation()}
-                    onClick={(e)=>{ e.stopPropagation(); toggleLink(id); }}
-                    title={l.lockWith ? `Height locked with ${TILE_META[l.lockWith]?.label ?? l.lockWith} — tap to unlock`
-                      : linkPick === id ? "Now tap the tile to lock heights with" : "Lock height with another tile"}
-                    aria-label="Lock height with another tile"
-                    style={{ position:"absolute", left:6, bottom:6, zIndex:6, display:"grid", placeItems:"center",
-                      width:26, height:26, borderRadius:8, cursor:"pointer",
-                      background: l.lockWith || linkPick === id ? C.accent : C.cardHi,
-                      color: l.lockWith || linkPick === id ? "#0c0e13" : C.sub,
-                      border:`1px solid ${l.lockWith || linkPick === id ? C.accent : C.edge}` }}>
-                    <Link2 size={14}/>
-                  </button>
+                  <div onPointerDown={(e)=>e.stopPropagation()}
+                    style={{ position:"absolute", top:6, right:6, zIndex:8, display:"flex", alignItems:"center", gap:4,
+                      background:`${C.bg0}e8`, border:`1px solid ${C.edge}`, borderRadius:9, padding:"3px 5px" }}>
+                    {id === "weather" && (<>
+                      <button onClick={(e)=>{e.stopPropagation(); bumpWeatherText(-0.1);}} aria-label="Smaller weather text"
+                        style={{width:22, height:22, display:"grid", placeItems:"center", background:"transparent", border:"none",
+                          color:C.sub, fontSize:10, fontWeight:800, cursor:"pointer", padding:0}}>A−</button>
+                      <span style={{fontSize:9.5, color:C.subDim, fontVariantNumeric:"tabular-nums"}}>{Math.round(wts*100)}%</span>
+                      <button onClick={(e)=>{e.stopPropagation(); bumpWeatherText(0.1);}} aria-label="Larger weather text"
+                        style={{width:22, height:22, display:"grid", placeItems:"center", background:"transparent", border:"none",
+                          color:C.sub, fontSize:12, fontWeight:800, cursor:"pointer", padding:0}}>A+</button>
+                      <span style={{width:1, alignSelf:"stretch", background:C.edge, margin:"2px 1px"}}/>
+                    </>)}
+                    <button onClick={(e)=>{ e.stopPropagation(); toggleLink(id); }}
+                      title={l.lockWith ? `Height locked with ${TILE_META[l.lockWith]?.label ?? l.lockWith} — tap to unlock`
+                        : linkPick === id ? "Now tap the tile to lock heights with" : "Lock height with another tile"}
+                      aria-label="Lock height with another tile"
+                      style={{width:22, height:22, display:"grid", placeItems:"center", borderRadius:6, cursor:"pointer", padding:0,
+                        background: l.lockWith || linkPick === id ? C.accent : "transparent",
+                        color: l.lockWith || linkPick === id ? "#0c0e13" : C.sub, border:"none"}}>
+                      <Link2 size={13}/>
+                    </button>
+                    <button onClick={(e)=>{ e.stopPropagation(); setVisible(id, false); }} aria-label="Hide tile"
+                      style={{width:22, height:22, display:"grid", placeItems:"center", background:"transparent", border:"none",
+                        color:C.sub, cursor:"pointer", padding:0}}>
+                      <EyeOff size={13}/>
+                    </button>
+                  </div>
                 )}
                 {edit && resizeHint?.id === id && (
                   <div style={{ position:"absolute", right:8, bottom:30, background:C.accent, color:"#0c0e13",
@@ -1819,6 +1862,7 @@ export default function WallPanel() {
           </div>
         </div>
       )}
+      {framePhotos !== null && <Slideshow photos={framePhotos} onClose={()=>setFramePhotos(null)} />}
       <BottomTabs/>
       <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>
