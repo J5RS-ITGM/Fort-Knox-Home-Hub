@@ -5,7 +5,7 @@ import * as THREE from "three";
 import {
   Lock, Unlock, Sun, Cloud, CloudDrizzle, CloudFog, CloudLightning, CloudRain, CloudSnow,
   Droplets, CheckSquare, Lightbulb, Zap, Wifi,
-  Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause, Warehouse,
+  Play, Moon, Radar, X, Settings2, Eye, EyeOff, RotateCcw, Pause, Warehouse, Link2,
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
 import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState, snapToWall, gridFromPlan, planFromGrid } from "@/lib/planScene";
@@ -594,7 +594,7 @@ const GRID_COLS = 12;
 // before. Board keeps the full left half below them. Radar stays hidden by
 // default (the Weather tile has a radar button). Each tile: desktop slot
 // (x,y,w,h), visibility, `m` = mobile stack order, and optionally `hp` =
-// an exact pixel height set by content-snapped resizing (locks/devices).
+// an exact pixel height set by dragging (plus `lockWith` height pairing).
 const LAYOUT_V = 6;
 const DEFAULT_LAYOUT = {
   clock:   { x:0, y:0, w:6, h:1, visible:true, m:0, _v:LAYOUT_V },
@@ -1168,28 +1168,45 @@ export default function WallPanel() {
     transition: dragId.current ? "none" : "left .18s, top .18s, width .18s, height .18s",
   });
 
-  // ---- content-snapped heights (locks / devices) ----
-  // Dragging the corner on these tiles snaps to WHOLE content rows —
-  // "2 locks", "3 rows of devices" — instead of arbitrary viewport
-  // fractions. Constants mirror the tiles' real row metrics (button
-  // padding + gaps + card chrome); content is centered, so ±a few px is
-  // invisible. The snapped height is stored as `hp` (exact px) alongside
-  // an approximate `h` so the mobile stack and migrations stay sane.
-  const SNAP_STEPS = {
-    lock:    { chrome: 45, rowOnce: 53, label: (n) => `${n} lock${n === 1 ? "" : "s"}` },
-    devices: { chrome: 113, rowOnce: 52, label: (n) => `${n} row${n === 1 ? "" : "s"} of devices` },
-  };
-  const snapHeight = (id, desiredPx, maxPx) => {
-    const s = SNAP_STEPS[id];
-    let best = null, bestN = 1;
-    for (let n = 1; n <= 12; n++) {
-      const px = s.chrome + n * s.rowOnce;
-      if (px > maxPx && best != null) break;
-      if (best == null || Math.abs(px - desiredPx) < Math.abs(best - desiredPx)) { best = px; bestN = n; }
+  // ---- exact-pixel heights + height locking ----
+  // Vertical resize is EXACT: dragging the corner sets the tile height in
+  // raw pixels (stored as `hp`; a live px readout shows while dragging).
+  // Width stays on the 12-column grid so tiles keep lining up left/right.
+  // A tile can also be HEIGHT-LOCKED to another (`lockWith`, mutual): in
+  // edit mode tap the chain on tile A, then tap tile B — from then on
+  // resizing either one resizes both to the same height.
+  const [resizeHint, setResizeHint] = useState(null); // {id, label} while resizing
+  const [linkPick, setLinkPick] = useState(null);     // tile id waiting for its partner
+  const pxHeight = (l) => (l.hp != null ? l.hp : rowSpanH(l.y, l.h) - GAP);
+  const toggleLink = (id) => {
+    const cur = layout[id]?.lockWith;
+    if (cur) {
+      setLayout(prev => {
+        const next = { ...prev, [id]: { ...prev[id], lockWith: undefined } };
+        if (next[cur]) next[cur] = { ...next[cur], lockWith: undefined };
+        return next;
+      });
+      setLinkPick(null);
+    } else {
+      setLinkPick(prev => (prev === id ? null : id));
     }
-    return { px: Math.min(best ?? desiredPx, maxPx), n: bestN };
   };
-  const [resizeHint, setResizeHint] = useState(null); // {id, label} while snapping
+  const completeLink = (id) => {
+    if (!linkPick || linkPick === id) return false;
+    const a = linkPick;
+    setLayout(prev => {
+      const hp = pxHeight(prev[a]);
+      const next = { ...prev };
+      for (const other of [prev[a]?.lockWith, prev[id]?.lockWith]) {
+        if (other && next[other]) next[other] = { ...next[other], lockWith: undefined };
+      }
+      next[a]  = { ...next[a],  lockWith: id, hp };
+      next[id] = { ...next[id], lockWith: a,  hp, h: next[a].h };
+      return next;
+    });
+    setLinkPick(null);
+    return true;
+  };
 
   // ---- drag + resize ----
   const dragId = useRef(null);
@@ -1216,16 +1233,14 @@ export default function WallPanel() {
         l.y = Math.max(0, Math.min(1 + UNIT_ROWS - l.h, start.current.y + dy));
       } else {
         l.w = Math.max(1, Math.min(GRID_COLS - l.x, start.current.w + dx));
-        if (SNAP_STEPS[id]) {
-          const desired = start.current.ph + (e.clientY - start.current.my);
-          const maxPx = gridTotalH - rowTop(l.y) - GAP;
-          const snap = snapHeight(id, desired, maxPx);
-          l.hp = snap.px;
-          l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, Math.round((snap.px + GAP) / unitH)));
-          setResizeHint({ id, label: SNAP_STEPS[id].label(snap.n) });
-        } else {
-          l.hp = undefined;
-          l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, start.current.h + dy));
+        const maxPx = gridTotalH - rowTop(l.y) - GAP;
+        const px = Math.round(Math.max(48, Math.min(maxPx, start.current.ph + (e.clientY - start.current.my))));
+        l.hp = px;
+        l.h = Math.max(1, Math.min(1 + UNIT_ROWS - l.y, Math.round((px + GAP) / unitH)));
+        setResizeHint({ id, label: `${px} px` });
+        const partner = l.lockWith && prev[l.lockWith];
+        if (partner) {
+          return { ...prev, [id]: l, [l.lockWith]: { ...partner, hp: px, h: l.h } };
         }
       }
       return { ...prev, [id]: l };
@@ -1240,6 +1255,17 @@ export default function WallPanel() {
 
   const setVisible = (id, v) => setLayout(prev => ({ ...prev, [id]: { ...prev[id], visible:v } }));
   const resetLayout = () => setLayout(DEFAULT_LAYOUT);
+
+  // ---- weather tile element toggles ----
+  // Every element of the weather tile is individually switchable (edit
+  // mode -> gear on the tile). Choices persist in the shared layout like
+  // the rest of the tile config.
+  const W_DEFAULTS = { icon:true, temp:true, cond:true, hilo:true, precip:true, hourly:true, hourPrecip:true, hours:6, radar:true };
+  const wopts = { ...W_DEFAULTS, ...(layout.weather?.opts || {}) };
+  const setWopt = (k, v) => setLayout(prev => ({ ...prev,
+    weather: { ...prev.weather, opts: { ...(prev.weather?.opts || {}), [k]: v } } }));
+  const [weatherCfg, setWeatherCfg] = useState(false);
+  useEffect(() => { if (!edit) { setLinkPick(null); setWeatherCfg(false); } }, [edit]);
 
   // ---- tile content ----
   const wxIconEl = (cond, size) => {
@@ -1286,24 +1312,62 @@ export default function WallPanel() {
     weather: (
       <div style={{ position:"relative", height:"100%", background:C.card, border:`1px solid ${C.edge}`,
         borderRadius:16, padding:"10px 16px", boxSizing:"border-box", overflow:"hidden" }}>
-        {edit && <button onClick={()=>setVisible("weather",false)} style={{position:"absolute", top:10, right:12, background:"none", border:"none", color:C.sub, cursor:"pointer", zIndex:2}}><EyeOff size={15}/></button>}
+        {edit && (
+          <div style={{position:"absolute", top:8, right:10, display:"flex", gap:8, zIndex:8}}>
+            <button onPointerDown={(e)=>e.stopPropagation()} onClick={(e)=>{e.stopPropagation(); setWeatherCfg(v=>!v);}}
+              aria-label="Weather tile options"
+              style={{background: weatherCfg?C.accent:"none", color: weatherCfg?"#0c0e13":C.sub, border:"none", borderRadius:6, padding:2, cursor:"pointer"}}>
+              <Settings2 size={15}/>
+            </button>
+            <button onClick={()=>setVisible("weather",false)} style={{background:"none", border:"none", color:C.sub, cursor:"pointer"}}><EyeOff size={15}/></button>
+          </div>
+        )}
+        {edit && weatherCfg && (
+          <div onPointerDown={(e)=>e.stopPropagation()}
+            style={{position:"absolute", top:32, right:8, zIndex:9, background:C.cardHi, border:`1px solid ${C.edge}`,
+              borderRadius:12, padding:"10px 12px", display:"flex", flexDirection:"column", gap:7, minWidth:190,
+              boxShadow:"0 12px 30px rgba(0,0,0,0.45)"}}>
+            {[["icon","Condition icon"],["temp","Temperature"],["cond","Condition text"],["hilo","High / Low"],
+              ["precip","Rain % (today)"],["hourly","Hourly forecast"],["hourPrecip","Hourly rain %"],["radar","Radar button"]].map(([k,label])=>(
+              <label key={k} style={{display:"flex", alignItems:"center", gap:8, fontSize:12, color:C.text, cursor:"pointer"}}>
+                <input type="checkbox" checked={!!wopts[k]} onChange={(e)=>setWopt(k, e.target.checked)}
+                  disabled={k==="hourPrecip" && !wopts.hourly} style={{accentColor:C.accent}}/>
+                <span style={{opacity: k==="hourPrecip" && !wopts.hourly ? 0.45 : 1}}>{label}</span>
+              </label>
+            ))}
+            <div style={{display:"flex", alignItems:"center", gap:8, fontSize:12, color: wopts.hourly?C.text:C.subDim}}>
+              Hours shown
+              <button onClick={()=>setWopt("hours", Math.max(3, wopts.hours-1))} disabled={!wopts.hourly}
+                style={{marginLeft:"auto", width:22, height:22, borderRadius:6, border:`1px solid ${C.edge}`, background:C.card, color:C.sub, cursor:"pointer"}}>−</button>
+              <span style={{minWidth:14, textAlign:"center", fontWeight:700}}>{wopts.hours}</span>
+              <button onClick={()=>setWopt("hours", Math.min(8, wopts.hours+1))} disabled={!wopts.hourly}
+                style={{width:22, height:22, borderRadius:6, border:`1px solid ${C.edge}`, background:C.card, color:C.sub, cursor:"pointer"}}>+</button>
+            </div>
+          </div>
+        )}
         {wx === null ? (
           <div style={{display:"flex", alignItems:"center", height:"100%", fontSize:12, color:C.sub}}>Loading weather…</div>
         ) : !wx.available ? (
           <div style={{display:"flex", alignItems:"center", height:"100%", fontSize:12, color:C.sub, lineHeight:1.5}}>{wx.reason ?? "Weather unavailable."}</div>
         ) : (
           <div style={{display:"flex", alignItems:"center", gap:14, height:"100%", minWidth:0, flexWrap:"wrap", rowGap:6}}>
-            {wxIconEl(wx.condition, 30)}
-            <span style={{fontSize:28, fontWeight:800, lineHeight:1, flexShrink:0, fontVariantNumeric:"tabular-nums"}}>
-              {wx.temp != null ? `${wx.temp}°` : "–"}
-            </span>
-            <div style={{display:"flex", flexDirection:"column", gap:2, flexShrink:0}}>
-              <span style={{fontSize:12, fontWeight:600, color:C.text}}>{condText(wx.condition)}</span>
-              <span style={{fontSize:11, color:C.sub}}>
-                {wx.hi != null && wx.lo != null ? `H${wx.hi}/L${wx.lo}` : wx.humidity != null ? `${wx.humidity}% hum` : ""}
+            {wopts.icon && wxIconEl(wx.condition, 30)}
+            {wopts.temp && (
+              <span style={{fontSize:28, fontWeight:800, lineHeight:1, flexShrink:0, fontVariantNumeric:"tabular-nums"}}>
+                {wx.temp != null ? `${wx.temp}°` : "–"}
               </span>
-            </div>
-            {wx.precip != null && (
+            )}
+            {(wopts.cond || wopts.hilo) && (
+              <div style={{display:"flex", flexDirection:"column", gap:2, flexShrink:0}}>
+                {wopts.cond && <span style={{fontSize:12, fontWeight:600, color:C.text}}>{condText(wx.condition)}</span>}
+                {wopts.hilo && (
+                  <span style={{fontSize:11, color:C.sub}}>
+                    {wx.hi != null && wx.lo != null ? `H${wx.hi}/L${wx.lo}` : wx.humidity != null ? `${wx.humidity}% hum` : ""}
+                  </span>
+                )}
+              </div>
+            )}
+            {wopts.precip && wx.precip != null && (
               <span title="Chance of rain today"
                 style={{display:"flex", alignItems:"center", gap:5, flexShrink:0, background:"rgba(107,138,253,0.12)",
                   border:`1px solid ${C.accent}55`, borderRadius:999, padding:"4px 10px"}}>
@@ -1311,26 +1375,32 @@ export default function WallPanel() {
                 <span style={{fontSize:13, fontWeight:800, color:C.accent}}>{wx.precip}%</span>
               </span>
             )}
-            <div style={{display:"flex", gap:12, marginLeft:"auto", overflow:"hidden"}}>
-              {(wx.hourly ?? []).slice(0, 6).map((f, i)=>(
-                <div key={i} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:1, flexShrink:0, minWidth:34}}>
-                  <span style={{fontSize:10, color:C.sub}}>{hourLabel(f.time)}</span>
-                  <div style={{display:"flex", alignItems:"center", gap:3}}>
-                    {wxIconEl(f.condition, 13)}
-                    <span style={{fontSize:12, fontWeight:700}}>{f.temp != null ? `${f.temp}°` : "–"}</span>
+            {wopts.hourly && (
+              <div style={{display:"flex", gap:12, marginLeft:"auto", overflow:"hidden"}}>
+                {(wx.hourly ?? []).slice(0, wopts.hours).map((f, i)=>(
+                  <div key={i} style={{display:"flex", flexDirection:"column", alignItems:"center", gap:1, flexShrink:0, minWidth:34}}>
+                    <span style={{fontSize:10, color:C.sub}}>{hourLabel(f.time)}</span>
+                    <div style={{display:"flex", alignItems:"center", gap:3}}>
+                      {wxIconEl(f.condition, 13)}
+                      <span style={{fontSize:12, fontWeight:700}}>{f.temp != null ? `${f.temp}°` : "–"}</span>
+                    </div>
+                    {wopts.hourPrecip && (
+                      <span style={{fontSize:9.5, fontWeight:700, color: (f.precip ?? 0) >= 40 ? C.accent : C.subDim, fontVariantNumeric:"tabular-nums"}}>
+                        {f.precip != null ? `${f.precip}%` : " "}
+                      </span>
+                    )}
                   </div>
-                  <span style={{fontSize:9.5, fontWeight:700, color: (f.precip ?? 0) >= 40 ? C.accent : C.subDim, fontVariantNumeric:"tabular-nums"}}>
-                    {f.precip != null ? `${f.precip}%` : " "}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
-              style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0,
-                background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
-                padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-              <Radar size={13}/> Radar
-            </button>
+                ))}
+              </div>
+            )}
+            {wopts.radar && (
+              <button onClick={()=>!edit && setShowRadar(true)} aria-label="Open radar"
+                style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0, marginLeft: wopts.hourly ? 0 : "auto",
+                  background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9,
+                  padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                <Radar size={13}/> Radar
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1693,10 +1763,25 @@ export default function WallPanel() {
           return (
             <div key={id} style={tileStyle(l)}>
               <div
-                onPointerDown={(e)=>onPointerDown(e, id, "move")}
-                style={{ height:"100%", cursor: edit?"grab":"default", position:"relative",
-                  outline: edit ? `1.5px dashed ${C.accent}` : "none", outlineOffset:2, borderRadius:16 }}>
+                onPointerDown={(e)=>{ if (edit && linkPick && completeLink(id)) { e.stopPropagation(); return; } onPointerDown(e, id, "move"); }}
+                style={{ height:"100%", cursor: edit ? (linkPick && linkPick !== id ? "copy" : "grab") : "default", position:"relative",
+                  outline: edit ? `1.5px ${linkPick === id ? "solid" : "dashed"} ${C.accent}` : "none", outlineOffset:2, borderRadius:16 }}>
                 {tileContent[id]}
+                {edit && (
+                  <button
+                    onPointerDown={(e)=>e.stopPropagation()}
+                    onClick={(e)=>{ e.stopPropagation(); toggleLink(id); }}
+                    title={l.lockWith ? `Height locked with ${TILE_META[l.lockWith]?.label ?? l.lockWith} — tap to unlock`
+                      : linkPick === id ? "Now tap the tile to lock heights with" : "Lock height with another tile"}
+                    aria-label="Lock height with another tile"
+                    style={{ position:"absolute", left:6, bottom:6, zIndex:6, display:"grid", placeItems:"center",
+                      width:26, height:26, borderRadius:8, cursor:"pointer",
+                      background: l.lockWith || linkPick === id ? C.accent : C.cardHi,
+                      color: l.lockWith || linkPick === id ? "#0c0e13" : C.sub,
+                      border:`1px solid ${l.lockWith || linkPick === id ? C.accent : C.edge}` }}>
+                    <Link2 size={14}/>
+                  </button>
+                )}
                 {edit && resizeHint?.id === id && (
                   <div style={{ position:"absolute", right:8, bottom:30, background:C.accent, color:"#0c0e13",
                     borderRadius:8, padding:"4px 10px", fontSize:12, fontWeight:800, whiteSpace:"nowrap", zIndex:6 }}>

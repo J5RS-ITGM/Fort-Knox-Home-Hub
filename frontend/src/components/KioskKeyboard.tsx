@@ -100,9 +100,11 @@ export default function KioskKeyboard() {
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   };
 
+  // Kid-sized keys: the panel keyboard is used by small fingers, so the
+  // board runs nearly full width with tall keys and large glyphs.
   const keyStyle = (alt = false): React.CSSProperties => ({
     background: alt ? C.keyAlt : C.key, border: `1px solid ${C.edge}`, color: alt ? C.sub : C.text,
-    borderRadius: 8, padding: "13px 0", fontSize: 16, fontWeight: 500, cursor: "pointer",
+    borderRadius: 10, padding: "22px 0", fontSize: 24, fontWeight: 600, cursor: "pointer",
     userSelect: "none", touchAction: "manipulation",
   });
   const rows = sym ? ROWS_SYM : ROWS_ABC;
@@ -110,9 +112,9 @@ export default function KioskKeyboard() {
   return (
     <div ref={kbRef}
       style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120,
-        background: C.bg, borderTop: `1px solid ${C.edge}`, padding: "8px 8px calc(8px + env(safe-area-inset-bottom))" }}>
-      <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", gap: 5 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(10,1fr)", gap: 5 }}>
+        background: C.bg, borderTop: `1px solid ${C.edge}`, padding: "10px 12px calc(10px + env(safe-area-inset-bottom))" }}>
+      <div style={{ maxWidth: 1280, margin: "0 auto", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(10,1fr)", gap: 8 }}>
           {ROW_NUM.map((k) => (
             <button key={k} style={keyStyle()} onPointerDown={(e) => { e.preventDefault(); insert(k); }}>{k}</button>
           ))}
@@ -120,7 +122,7 @@ export default function KioskKeyboard() {
         {rows.map((row, i) => (
           <div key={i} style={{ display: "grid",
             gridTemplateColumns: i === 2 && !sym ? `1.4fr repeat(${row.length},1fr) 1.4fr`
-              : row.length < 10 ? `0.5fr repeat(${row.length},1fr) 0.5fr` : `repeat(${row.length},1fr)`, gap: 5 }}>
+              : row.length < 10 ? `0.5fr repeat(${row.length},1fr) 0.5fr` : `repeat(${row.length},1fr)`, gap: 8 }}>
             {i === 2 && !sym && (
               <button style={{ ...keyStyle(true), background: shift ? C.accent : C.keyAlt, color: shift ? "#0c0e13" : C.sub }}
                 aria-label="Shift" onPointerDown={(e) => { e.preventDefault(); setShift((v) => !v); }}>⇧</button>
@@ -142,14 +144,14 @@ export default function KioskKeyboard() {
             ) : <span />)}
           </div>
         ))}
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 4.6fr 1fr 1.6fr", gap: 5 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 4.6fr 1fr 1.6fr", gap: 8 }}>
           <button style={keyStyle(true)} onPointerDown={(e) => { e.preventDefault(); setSym((v) => !v); setShift(false); }}>
             {sym ? "ABC" : "?123"}
           </button>
-          <button style={{ ...keyStyle(), color: C.sub, fontSize: 13 }} aria-label="Space"
+          <button style={{ ...keyStyle(), color: C.sub, fontSize: 18 }} aria-label="Space"
             onPointerDown={(e) => { e.preventDefault(); insert(" "); }}>space</button>
           <button style={keyStyle()} onPointerDown={(e) => { e.preventDefault(); insert("'"); }}>&apos;</button>
-          <button style={{ ...keyStyle(), background: C.accent, border: `1px solid ${C.accent}`, color: "#0c0e13", fontWeight: 800, fontSize: 14 }}
+          <button style={{ ...keyStyle(), background: C.accent, border: `1px solid ${C.accent}`, color: "#0c0e13", fontWeight: 800, fontSize: 20 }}
             onPointerDown={(e) => { e.preventDefault(); done(); }}>Done</button>
         </div>
       </div>
