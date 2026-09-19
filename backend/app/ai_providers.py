@@ -244,3 +244,94 @@ async def extract_recipe(db: AsyncSession, image_bytes: bytes, mime: str) -> dic
         "steps": _lines(it.get("steps"))[:16000],
         "notes": _lines(it.get("notes"))[:4000],
     }
+
+
+_MAINT_PROMPT = """You are reading a photo related to a HOME MAINTENANCE task \
+(an appliance/equipment manual page, a maintenance schedule, a sticker on a \
+unit, a handwritten note, or a how-to). Turn it into ONE clear maintenance \
+task with an ordered how-to.
+
+Return ONLY a JSON object, no prose, no markdown fences:
+{
+  "title": "short task name, e.g. 'Mr Cool Mini Split Service'",
+  "category": "one of: HVAC, Plumbing, Electrical, Exterior, Appliance, Vehicle, Lawn, Safety, General",
+  "equipment": "the specific unit/model if shown, e.g. 'Mr Cool DIY 24k' (empty if none)",
+  "steps": ["one action per array item, in order, imperative voice, no leading numbers"],
+  "supplies": ["consumables/tools needed, one per item, e.g. '16x25x1 MERV 11 filter' (empty array if none)"],
+  "suggested_frequency": "one of: monthly, quarterly, biannual, annual (best guess from the material, else 'annual')",
+  "notes": "torque specs, cautions, part numbers, or source (empty if none)"
+}
+
+Rules:
+- Keep the source's own wording where it matters (part numbers, measurements); fix obvious OCR garbles only.
+- Merge wrapped lines: a step or supply split across lines is ONE item.
+- Strip step numbers and bullet characters — ordering is the array order.
+- If the photo shows a schedule with several intervals, capture the steps for the most prominent task and put the others in "notes".
+- If nothing maintenance-related is readable, return {"title": ""}.
+"""
+
+
+async def extract_maintenance(db: AsyncSession, image_bytes: bytes, mime: str) -> dict:
+    """Send a maintenance-related photo to Gemini, get back one parsed task.
+
+    Returns an UNSAVED candidate (steps/supplies as newline-joined strings,
+    plus a suggested frequency) for the review/edit screen; the caller saves
+    it through POST /api/maintenance after the user confirms.
+    """
+    key = _dec(await _get(db, K_GEMINI_KEY))
+    if not key:
+        raise ValueError("no Gemini key set — add one in Admin → Settings")
+    model = (await _get(db, K_GEMINI_MODEL)) or DEFAULT_GEMINI_MODEL
+
+    body = {
+        "contents": [{
+            "parts": [
+                {"text": _MAINT_PROMPT},
+                {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_bytes).decode("ascii")}},
+            ]
+        }],
+        "generationConfig": {"temperature": 0, "response_mime_type": "application/json"},
+    }
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(
+            f"{GEMINI_BASE}/models/{model}:generateContent",
+            params={"key": key}, json=body,
+        )
+        if r.status_code == 400 and "API_KEY" in r.text:
+            raise ValueError("Gemini rejected the API key")
+        r.raise_for_status()
+        data = r.json()
+
+    try:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        raise ValueError("Gemini returned no readable content")
+
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1].lstrip("json").strip() if "```" in text[3:] else text.strip("`")
+    try:
+        it = json.loads(text)
+    except json.JSONDecodeError:
+        raise ValueError("could not parse the maintenance task — try a clearer photo")
+    if not isinstance(it, dict) or not str(it.get("title", "")).strip():
+        raise ValueError("no maintenance task found in that photo — try a closer, clearer shot")
+
+    def _mlines(v) -> str:
+        if isinstance(v, list):
+            return "\n".join(str(x).strip() for x in v if str(x).strip())
+        return str(v or "").strip()
+
+    freq = str(it.get("suggested_frequency", "annual")).strip().lower()
+    if freq not in {"monthly", "quarterly", "biannual", "annual"}:
+        freq = "annual"
+
+    return {
+        "title": str(it.get("title", "")).strip()[:160],
+        "category": str(it.get("category", "")).strip()[:40],
+        "equipment": str(it.get("equipment", "")).strip()[:120],
+        "steps": _mlines(it.get("steps"))[:16000],
+        "supplies": _mlines(it.get("supplies"))[:8000],
+        "notes": _mlines(it.get("notes"))[:4000],
+        "frequency": freq,
+    }

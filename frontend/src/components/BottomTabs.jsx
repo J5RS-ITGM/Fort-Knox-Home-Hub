@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { CalendarDays, ChefHat, Images, LayoutGrid, ListChecks, ListTodo, LockOpen, Shield, SlidersHorizontal } from "lucide-react";
+import { CalendarDays, ChefHat, Images, LayoutGrid, ListChecks, ListTodo, LockOpen, Shield, SlidersHorizontal, Wrench } from "lucide-react";
 import KioskGate from "@/components/KioskGate";
 import { useMe , isKiosk } from "@/lib/auth";
 
@@ -19,6 +19,7 @@ const TABS = [
   { href: "/chores", label: "Tasks", Icon: ListChecks },
   { href: "/todo", label: "To-Do", Icon: ListTodo },
   { href: "/recipes", label: "Recipes", Icon: ChefHat },
+  { href: "/maintenance", label: "Upkeep", Icon: Wrench },
   // Control replaces Sensors here: kiosk users flip lights/devices, they
   // don't read raw sensor telemetry. Sensors stays reachable in browser
   // sessions via the AppHeader.

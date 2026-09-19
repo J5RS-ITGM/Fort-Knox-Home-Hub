@@ -250,7 +250,35 @@ class Recipe(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Todo(Base):
+class MaintenanceTask(Base):
+    """A recurring home-maintenance job (e.g. "Mr Cool Mini Split Service").
+    Steps are one-per-line like a recipe; the AI photo/manual importer fills
+    them. Scheduling: a frequency + an anchor month/day the job should land
+    near. `next_due` (YYYY-MM-DD) is computed on save and after each
+    completion; the wall panel surfaces items whose next_due is at or before
+    today (a reminder feed like tasks/events). HA is not involved."""
+
+    __tablename__ = "maintenance_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    category: Mapped[str] = mapped_column(String(40), nullable=False, default="")   # HVAC, Plumbing, Exterior…
+    equipment: Mapped[str] = mapped_column(String(120), nullable=False, default="") # "Mr Cool DIY 24k"
+    steps: Mapped[str] = mapped_column(Text, nullable=False, default="")            # one per line
+    supplies: Mapped[str] = mapped_column(Text, nullable=False, default="")         # one per line (filters, etc.)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Scheduling. frequency: monthly | quarterly | biannual | annual | custom.
+    # For custom, interval_months carries the spacing. anchor_month (1-12) and
+    # anchor_day (1-31) mark roughly WHEN in the year it should occur; either
+    # may be null (then the anchor is just "N months from last done").
+    frequency: Mapped[str] = mapped_column(String(16), nullable=False, default="annual")
+    interval_months: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
+    anchor_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    anchor_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_done: Mapped[str | None] = mapped_column(String(10), nullable=True)   # YYYY-MM-DD
+    next_due: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)  # YYYY-MM-DD
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     """Household to-do item. The panel 'tasks' tile shows a read-only summary
     of the open ones; this table is the single source of truth managed from
     the To-Do page."""

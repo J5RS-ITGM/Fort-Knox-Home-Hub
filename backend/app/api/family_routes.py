@@ -703,6 +703,230 @@ async def delete_recipe(rid: str, user: models.User = Depends(get_current_user),
     await audit(db, user.username, "recipe_deleted", r.title)
 
 
+# ========================= Home Maintenance ==================================
+# Recurring maintenance jobs with an AI-parsed how-to and a schedule. next_due
+# is computed here (not in the DB) so the wall panel can surface a plain
+# reminder feed: anything active with next_due <= today.
+from datetime import date as _date, timedelta as _timedelta  # noqa: E402
+
+_FREQ_MONTHS = {"monthly": 1, "quarterly": 3, "biannual": 6, "annual": 12}
+
+
+def _freq_interval(frequency: str, interval_months: int) -> int:
+    f = (frequency or "").lower()
+    if f in _FREQ_MONTHS:
+        return _FREQ_MONTHS[f]
+    return max(1, int(interval_months or 12))  # custom
+
+
+def _add_months(d: _date, months: int) -> _date:
+    m = d.month - 1 + months
+    y = d.year + m // 12
+    m = m % 12 + 1
+    # clamp day to end of target month
+    import calendar as _cal
+    day = min(d.day, _cal.monthrange(y, m)[1])
+    return _date(y, m, day)
+
+
+def _compute_next_due(*, frequency: str, interval_months: int,
+                      anchor_month: int | None, anchor_day: int | None,
+                      last_done: str | None) -> str:
+    """Next due date (YYYY-MM-DD).
+
+    - If last_done is set: last_done + interval, then nudged to the anchor
+      month/day if one is given (keeps "quarterly, near the 1st" tidy).
+    - If never done: the next future occurrence of the anchor this year or
+      next; with no anchor, `interval` months from today.
+    """
+    today = _date.today()
+    interval = _freq_interval(frequency, interval_months)
+
+    if last_done:
+        try:
+            base = _date.fromisoformat(last_done)
+        except ValueError:
+            base = today
+        due = _add_months(base, interval)
+        if anchor_month:
+            import calendar as _cal
+            # Snap to the anchor month, choosing the year whose anchor date is
+            # closest to the raw interval date — but never before it, so a
+            # fixed anchor can't roll the next due date into the past.
+            day0 = anchor_day or 1
+            best = None
+            for yr in (due.year - 1, due.year, due.year + 1):
+                d = min(day0, _cal.monthrange(yr, anchor_month)[1])
+                cand = _date(yr, anchor_month, d)
+                if cand < due:
+                    continue
+                if best is None or cand < best:
+                    best = cand
+            due = best or due
+        return due.isoformat()
+
+    if anchor_month:
+        import calendar as _cal
+        day = anchor_day or 1
+        day = min(day, _cal.monthrange(today.year, anchor_month)[1])
+        cand = _date(today.year, anchor_month, day)
+        if cand < today:
+            day = min(anchor_day or 1, _cal.monthrange(today.year + 1, anchor_month)[1])
+            cand = _date(today.year + 1, anchor_month, day)
+        return cand.isoformat()
+
+    return _add_months(today, interval).isoformat()
+
+
+class MaintenanceIn(BaseModel):
+    title: str
+    category: str = ""
+    equipment: str = ""
+    steps: str = ""
+    supplies: str = ""
+    notes: str = ""
+    frequency: str = "annual"          # monthly|quarterly|biannual|annual|custom
+    interval_months: int = 12          # used when frequency == custom
+    anchor_month: int | None = None    # 1-12
+    anchor_day: int | None = None      # 1-31
+    last_done: str | None = None       # YYYY-MM-DD
+    active: bool = True
+
+
+def _maint_dict(m: models.MaintenanceTask) -> dict:
+    return {
+        "id": m.id, "title": m.title, "category": m.category, "equipment": m.equipment,
+        "steps": m.steps, "supplies": m.supplies, "notes": m.notes,
+        "frequency": m.frequency, "interval_months": m.interval_months,
+        "anchor_month": m.anchor_month, "anchor_day": m.anchor_day,
+        "last_done": m.last_done, "next_due": m.next_due, "active": m.active,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    }
+
+
+@router.get("/maintenance")
+async def list_maintenance(db: AsyncSession = Depends(get_session)) -> list[dict]:
+    rows = (await db.execute(
+        select(models.MaintenanceTask).order_by(models.MaintenanceTask.next_due.nullslast())
+    )).scalars().all()
+    return [_maint_dict(m) for m in rows]
+
+
+# Maintenance photo -> one parsed task (Gemini, same vault as recipes). Returns
+# an UNSAVED candidate for the review screen; saved via POST /api/maintenance.
+@router.post("/maintenance/extract")
+async def extract_maintenance_photo(
+    file: UploadFile,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    from .. import ai_providers
+
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to import maintenance tasks")
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/heic"}
+    if (file.content_type or "") not in allowed:
+        raise HTTPException(422, "upload a JPEG, PNG, WebP, or HEIC photo")
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(413, "photo too large (15MB max)")
+    try:
+        task = await ai_providers.extract_maintenance(db, data, file.content_type)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"extraction failed: {e}") from e
+    await audit(db, user.username, "maintenance_extracted", f"{task['title']} from {file.filename}")
+    return {"task": task}
+
+
+def _apply_maint(m: models.MaintenanceTask, body: MaintenanceIn) -> None:
+    m.category = body.category.strip()
+    m.equipment = body.equipment.strip()
+    m.steps = body.steps
+    m.supplies = body.supplies
+    m.notes = body.notes
+    m.frequency = (body.frequency or "annual").strip().lower()
+    m.interval_months = max(1, int(body.interval_months or 12))
+    m.anchor_month = body.anchor_month if (body.anchor_month and 1 <= body.anchor_month <= 12) else None
+    m.anchor_day = body.anchor_day if (body.anchor_day and 1 <= body.anchor_day <= 31) else None
+    m.last_done = (body.last_done or None)
+    m.active = bool(body.active)
+    m.next_due = _compute_next_due(
+        frequency=m.frequency, interval_months=m.interval_months,
+        anchor_month=m.anchor_month, anchor_day=m.anchor_day, last_done=m.last_done,
+    )
+
+
+@router.post("/maintenance", status_code=201)
+async def create_maintenance(body: MaintenanceIn, user: models.User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_session)) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to add maintenance tasks")
+    if not body.title.strip():
+        raise HTTPException(422, "title required")
+    m = models.MaintenanceTask(title=body.title.strip())
+    _apply_maint(m, body)
+    db.add(m); await db.commit()
+    await audit(db, user.username, "maintenance_added", m.title)
+    return {"id": m.id, "next_due": m.next_due}
+
+
+@router.patch("/maintenance/{mid}")
+async def patch_maintenance(mid: str, body: MaintenanceIn, user: models.User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_session)) -> dict:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to edit maintenance tasks")
+    m = await db.get(models.MaintenanceTask, mid)
+    if m is None:
+        raise HTTPException(404, "no such maintenance task")
+    m.title = body.title.strip() or m.title
+    _apply_maint(m, body)
+    await db.commit()
+    await audit(db, user.username, "maintenance_updated", m.title)
+    return {"ok": True, "next_due": m.next_due}
+
+
+# Mark done (kiosk-allowed: checking off a completed chore is a panel action).
+# Records last_done (defaults today) and rolls next_due forward one interval.
+class MaintDoneIn(BaseModel):
+    date: str | None = None  # YYYY-MM-DD, defaults today
+
+
+@router.post("/maintenance/{mid}/done")
+async def complete_maintenance(mid: str, body: MaintDoneIn,
+                               user: models.User = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_session)) -> dict:
+    m = await db.get(models.MaintenanceTask, mid)
+    if m is None:
+        raise HTTPException(404, "no such maintenance task")
+    done = (body.date or _date.today().isoformat())
+    try:
+        _date.fromisoformat(done)
+    except ValueError:
+        raise HTTPException(422, "bad date")
+    m.last_done = done
+    m.next_due = _compute_next_due(
+        frequency=m.frequency, interval_months=m.interval_months,
+        anchor_month=m.anchor_month, anchor_day=m.anchor_day, last_done=done,
+    )
+    await db.commit()
+    await audit(db, user.username, "maintenance_done", f"{m.title} @ {done}")
+    return {"ok": True, "last_done": m.last_done, "next_due": m.next_due}
+
+
+@router.delete("/maintenance/{mid}", status_code=204)
+async def delete_maintenance(mid: str, user: models.User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_session)) -> None:
+    if getattr(user, "kiosk", False):
+        raise HTTPException(403, "exit kiosk mode to delete maintenance tasks")
+    m = await db.get(models.MaintenanceTask, mid)
+    if m is None:
+        raise HTTPException(404, "no such maintenance task")
+    await db.delete(m); await db.commit()
+    await audit(db, user.username, "maintenance_deleted", m.title)
+
+
 # ============================ To-Do ==========================================
 class TodoIn(BaseModel):
     title: str
