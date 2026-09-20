@@ -206,14 +206,14 @@ async def list_audit(limit: int = 100, db: AsyncSession = Depends(get_session)) 
 
 
 # -- admin: HA bridge configuration ------------------------------------------
-from ..bridge import effective_ha_config, manager, put_alarm_code, put_setting  # noqa: E402
+from ..bridge import effective_ha_config, manager, put_setting  # noqa: E402
 from ..schemas import FamilyIn, FamilyOut, FamilyPatch, HASettingsIn, HASettingsOut  # noqa: E402
 
 
 @admin_router.get("/settings/ha", response_model=HASettingsOut)
 async def get_ha_settings(db: AsyncSession = Depends(get_session)) -> HASettingsOut:
     cfg = await effective_ha_config(db)
-    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], alarm_code_set=cfg["alarm_code_set"], mode=manager.mode)
+    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], mode=manager.mode)
 
 
 @admin_router.put("/settings/ha", response_model=HASettingsOut)
@@ -232,12 +232,9 @@ async def put_ha_settings(
     if body.ha_token:
         await put_setting(db, "ha_token", body.ha_token)
         changes.append("ha_token(updated)")
-    if body.ha_alarm_code is not None:
-        await put_alarm_code(db, body.ha_alarm_code)
-        changes.append("ha_alarm_code(updated)" if body.ha_alarm_code.strip() else "ha_alarm_code(cleared)")
     await audit(db, admin.username, "ha_settings", ", ".join(changes) or "no-op")
     cfg = await effective_ha_config(db)
-    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], alarm_code_set=cfg["alarm_code_set"], mode=manager.mode)
+    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], mode=manager.mode)
 
 
 @admin_router.post("/bridge/restart", response_model=HASettingsOut)
@@ -245,7 +242,7 @@ async def restart_bridge(admin=Depends(require_admin), db: AsyncSession = Depend
     mode = await manager.restart()
     await audit(db, admin.username, "bridge_restart", f"now {mode}")
     cfg = await effective_ha_config(db)
-    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], alarm_code_set=cfg["alarm_code_set"], mode=mode)
+    return HASettingsOut(ha_url=cfg["url"], ha_mock=cfg["mock"], token_set=cfg["token_set"], mode=mode)
 
 
 # -- admin: household roster --------------------------------------------------

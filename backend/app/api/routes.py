@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import models
 from ..auth import audit, check_rate_limit, clear_failures, get_current_user, record_failure, verify_password
 from .. import allowlist
-from ..bridge import get_alarm_code, manager
+from ..bridge import manager
 from ..config import get_settings
 from ..db import get_session
 from ..ha.state import cache
@@ -70,13 +70,8 @@ async def call_service(
         raise HTTPException(404, f"unknown entity: {body.entity_id}")
 
     # The PIN is an app-level field: pop it unconditionally so it can never
-    # be forwarded to HA in any service payload. Also strip any client-sent
-    # `code` — HA's alarm code is a server-side secret (stored encrypted in
-    # app settings, set on the Admin > HA bridge tab) and is only ever added
-    # below, after the per-user PIN gate, so the browser can never bypass the
-    # app PIN by supplying HA's code directly.
+    # be forwarded to HA in any service payload.
     pin = body.data.pop("pin", None)
-    body.data.pop("code", None)
 
     # Arm/disarm PIN gate. Enforced here (not in the UI) so the API itself
     # is protected; per-user, so the audit trail says WHO armed/disarmed.
@@ -92,13 +87,6 @@ async def call_service(
             await audit(session, user.username, "alarm_pin_fail", f"{service} -> {body.entity_id}")
             raise HTTPException(403, "pin_invalid")
         clear_failures(f"pin:{user.username}", ip)
-
-    # The app PIN check passed (or the user is ungated): satisfy HA's own
-    # `code_arm_required` / disarm code with the server-held alarm code.
-    if domain == "alarm_control_panel":
-        alarm_code = await get_alarm_code(session)
-        if alarm_code:
-            body.data["code"] = alarm_code
 
     bridge = manager.bridge
     if bridge is None:

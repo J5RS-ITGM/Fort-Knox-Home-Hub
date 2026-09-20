@@ -6,3 +6,4 @@ __pycache__/
 *.db
 seed.json
 backend/seed.json
+frontend/tsconfig.tsbuildinfo

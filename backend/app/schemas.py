@@ -113,7 +113,6 @@ class HASettingsOut(BaseModel):
     ha_url: str
     ha_mock: bool
     token_set: bool
-    alarm_code_set: bool = False  # HA alarm panel code stored (never echoed)
     mode: str  # what the bridge is actually running
 
 
@@ -121,7 +120,6 @@ class HASettingsIn(BaseModel):
     ha_url: str | None = None
     ha_mock: bool | None = None
     ha_token: str | None = None  # write-only; never echoed back
-    ha_alarm_code: str | None = None  # write-only; "" clears it
 
 
 class FamilyIn(BaseModel):
