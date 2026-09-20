@@ -7,7 +7,7 @@
 import { usePinGate } from "@/lib/pinGate";
 import { useMemo, useRef, useState } from "react";
 import PageShell from "@/components/PageShell";
-import { callService, Entity } from "@/lib/api";
+import { callService, Entity, ServiceResult } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 const isOn = (e: Entity) => e.state === "on";
@@ -85,12 +85,16 @@ export default function ControlPage() {
     const name = String(e.attributes?.friendly_name ?? e.entity_id);
     mark(e.entity_id, true);
     let ok = false;
-    try { ok = await runPin(`PIN to ${service} · ${name}`, (pin) => callService("lock", service, e.entity_id, pin ? { pin } : {})); }
+    const out: { res: ServiceResult | null } = { res: null };
+    try { ok = await runPin(`PIN to ${service} · ${name}`, async (pin) => { out.res = await callService("lock", service, e.entity_id, pin ? { pin } : {}); }); }
     finally {
       // Accepted: brief pulse then let HA's state carry the story. Cancelled
       // or rejected: drop the pulse right away, nothing is happening.
-      if (ok) { showToast(`${service === "unlock" ? "Unlocking" : "Locking"} ${name}…`); setTimeout(() => mark(e.entity_id, false), 400); }
-      else mark(e.entity_id, false);
+      if (ok) {
+        const verb = service === "unlock" ? "Unlocking" : "Locking";
+        showToast(out.res?.disarmed ? `${verb} ${name} · Alarm disarmed` : `${verb} ${name}…`);
+        setTimeout(() => mark(e.entity_id, false), 400);
+      } else mark(e.entity_id, false);
     }
   };
 

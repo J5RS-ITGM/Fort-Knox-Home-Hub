@@ -13,6 +13,11 @@ from ..auth import audit, check_rate_limit, clear_failures, get_current_user, re
 # Locks join the alarm here: an unlock is a security action, so a stolen
 # member login can't open a door without the PIN either.
 PIN_GATED_DOMAINS = {"alarm_control_panel", "lock"}
+ALARM_ENTITY = "alarm_control_panel.homehub"
+# Panel states an app unlock stands down. NOT "arming": unlocking a door from
+# the app during the exit delay means you're heading out, and cancelling the
+# arm would be a surprise. NOT "disarmed": nothing to do.
+ARMED_STATES = {"armed_away", "armed_home", "armed_night", "armed_vacation", "armed_custom_bypass", "pending", "triggered"}
 from .. import allowlist
 from ..bridge import manager
 from ..config import get_settings
@@ -101,7 +106,26 @@ async def call_service(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"service call failed: {exc}") from exc
     await audit(session, user.username, "service_call", f"{domain}.{service} -> {body.entity_id}")
-    return {"ok": True}
+
+    # A PIN-verified UNLOCK from the app also disarms the alarm. Same
+    # credential as a disarm (the PIN gate above already passed), so this adds
+    # no exposure; it just makes "let someone in" one action instead of two.
+    # HA-side RF unlocks (automations, dashboards) are NOT covered: only this
+    # app path, only after the PIN. Keypad codes at the door are handled by
+    # the HA automation.
+    disarmed = False
+    if domain == "lock" and service == "unlock":
+        alarm = cache.get(ALARM_ENTITY)
+        if alarm is not None and alarm.state in ARMED_STATES:
+            try:
+                await bridge.call_service("alarm_control_panel", "alarm_disarm", ALARM_ENTITY, {})
+                disarmed = True
+                await audit(session, user.username, "service_call",
+                            f"alarm_control_panel.alarm_disarm -> {ALARM_ENTITY} (with unlock of {body.entity_id})")
+            except Exception:  # noqa: BLE001
+                # the door still unlocked; the app will show the alarm still armed
+                pass
+    return {"ok": True, "disarmed": disarmed}
 
 
 # -- ui settings (any signed-in user) ----------------------------------------

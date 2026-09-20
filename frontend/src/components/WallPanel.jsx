@@ -1148,11 +1148,14 @@ export default function WallPanel() {
     if (l.state === "locking" || l.state === "unlocking") return;
     const svc = l.state === "locked" ? "unlock" : "lock";
     const name = l.attributes?.friendly_name || l.entity_id;
-    const ok = await runPin(`PIN to ${svc} · ${name}`, (pin) => callService("lock", svc, l.entity_id, pin ? { pin } : {}));
+    let res = null;
+    const ok = await runPin(`PIN to ${svc} · ${name}`, async (pin) => { res = await callService("lock", svc, l.entity_id, pin ? { pin } : {}); });
     if (ok) {
       // PIN accepted (or not needed) and HA took the command: say so, and let
       // the "Working…" pulse run until the lock actually reports its new state.
-      showToast(`${svc === "unlock" ? "Unlocking" : "Locking"} ${name}…`, svc === "unlock" ? C.open : C.accent);
+      // An unlock while armed also disarmed (server-side, same PIN); say that too.
+      const verb = svc === "unlock" ? "Unlocking" : "Locking";
+      showToast(res?.disarmed ? `${verb} ${name} · Alarm disarmed` : `${verb} ${name}…`, svc === "unlock" ? C.open : C.accent);
     } else {
       // PIN pad cancelled / wrong PIN / call failed: stop the pulse immediately
       // so the button never sits on "Working…" for something that isn't happening.

@@ -71,12 +71,14 @@ export class ServiceError extends Error {
   }
 }
 
+export interface ServiceResult { ok: boolean; disarmed?: boolean }
+
 export async function callService(
   domain: string,
   service: string,
   entityId: string,
   data: Record<string, unknown> = {},
-): Promise<void> {
+): Promise<ServiceResult> {
   const res = await api(`/api/services/${domain}/${service}`, {
     method: "POST",
     body: JSON.stringify({ entity_id: entityId, data }),
@@ -85,4 +87,5 @@ export async function callService(
     const body = await res.json().catch(() => null);
     throw new ServiceError(res.status, String(body?.detail ?? res.statusText));
   }
+  return (await res.json().catch(() => ({ ok: true }))) as ServiceResult;
 }
