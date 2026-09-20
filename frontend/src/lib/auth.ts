@@ -33,6 +33,13 @@ export async function logout(): Promise<void> {
   window.location.href = "/login";
 }
 
+/** Sign this account out on EVERY device (lost phone, suspected theft). */
+export async function logoutAll(): Promise<void> {
+  if (!window.confirm("Sign out on every device? Anyone using this account elsewhere will have to log in again.")) return;
+  await api("/api/auth/logout-all", { method: "POST" });
+  window.location.href = "/login";
+}
+
 export function useMe(): { me: User | null; loading: boolean } {
   const [me, setMe] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);

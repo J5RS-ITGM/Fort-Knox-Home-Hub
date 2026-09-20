@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # Secure cookies require HTTPS; keep False only for local dev over http.
     cookie_secure: bool = False
     session_ttl_days: int = 30
+    # Admin sessions are the keys to the kingdom (they can change PINs and
+    # passwords), so they expire much sooner than member/kiosk sessions.
+    admin_session_ttl_days: int = 3
 
     cors_origins: str = "http://localhost:3000"
 

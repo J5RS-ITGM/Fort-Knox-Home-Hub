@@ -13,6 +13,7 @@ import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
 import AlarmOverlay from "@/components/AlarmOverlay";
+import { usePinGate } from "@/lib/pinGate";
 import AppHeader from "@/components/AppHeader";
 import Slideshow from "@/components/Slideshow";
 import { isKiosk, useMe } from "@/lib/auth";
@@ -1090,7 +1091,7 @@ export default function WallPanel() {
     // The full-screen desktop/kiosk panel locks the body so it behaves like
     // a fixed dashboard. On mobile the panel is a normal scrolling page —
     // locking the body there is exactly what broke vertical scrolling.
-    if (window.innerWidth < 640) return;
+    if (window.innerWidth < 900) return;
     const prev = { o:document.body.style.overflow, ob:document.body.style.overscrollBehavior, m:document.body.style.margin };
     document.body.style.overflow="hidden"; document.body.style.overscrollBehavior="none"; document.body.style.margin="0";
     return ()=>{ document.body.style.overflow=prev.o; document.body.style.overscrollBehavior=prev.ob; document.body.style.margin=prev.m; };
@@ -1118,10 +1119,12 @@ export default function WallPanel() {
   };
   // Explicit lock/unlock (never toggle): lock.toggle isn't allowlisted, and
   // deadbolts shouldn't get ambiguous toggles. In-motion states are ignored.
+  const { run: runPin, pad: lockPinPad } = usePinGate();
   const lockAction = async (l) => {
     if (l.state === "locking" || l.state === "unlocking") return;
-    try { await callService("lock", l.state === "locked" ? "unlock" : "lock", l.entity_id); }
-    catch (e) { console.error(e); }
+    const svc = l.state === "locked" ? "unlock" : "lock";
+    const name = l.attributes?.friendly_name || l.entity_id;
+    await runPin(`PIN to ${svc} · ${name}`, (pin) => callService("lock", svc, l.entity_id, pin ? { pin } : {}));
   };
 
   // ---- grid geometry ----
@@ -1147,9 +1150,9 @@ export default function WallPanel() {
     try { localStorage.setItem(TEXT_KEY, String(next)); } catch {}
     return next;
   });
-  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 640);
+    const check = () => setIsMobile(window.innerWidth < 900);
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -1869,6 +1872,7 @@ export default function WallPanel() {
       )}
       {framePhotos !== null && <Slideshow photos={framePhotos} onClose={()=>setFramePhotos(null)} />}
       <AlarmOverlay alarm={alarm} entities={entities} onDisarm={()=>setDisarmSignal((n)=>n+1)} />
+      {lockPinPad}
       <BottomTabs/>
       <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>

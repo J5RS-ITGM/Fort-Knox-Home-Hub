@@ -16,7 +16,7 @@ import {
 import AlarmControl from "@/components/AlarmControl";
 import KioskGate from "@/components/KioskGate";
 import { Lamp } from "@/components/Lamp";
-import { isKiosk, logout, useMe } from "@/lib/auth";
+import { isKiosk, logout, logoutAll, useMe } from "@/lib/auth";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 export const MOBILE_TOP_H = 56;
@@ -70,7 +70,7 @@ export default function MobileNav() {
   };
 
   return (
-    <div className="sm:hidden">
+    <div className="tb:hidden">
       {/* Top bar: brand + status + alarm */}
       <header
         style={{
@@ -141,6 +141,7 @@ export default function MobileNav() {
               {isAdmin && <a href="/admin" style={{ padding: "12px 8px", borderRadius: 10, textDecoration: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Admin</a>}
               {!kiosk && <button onClick={() => { setMore(false); setGate(true); }} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Enter kiosk mode</button>}
               {!kiosk && <button onClick={() => logout()} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Sign out</button>}
+              {!kiosk && <button onClick={() => logoutAll()} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Sign out everywhere</button>}
             </div>
           </div>
         </div>

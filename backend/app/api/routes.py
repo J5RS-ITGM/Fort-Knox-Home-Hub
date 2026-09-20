@@ -8,6 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
 from ..auth import audit, check_rate_limit, clear_failures, get_current_user, record_failure, verify_password
+
+# Domains whose service calls require the user's PIN (when they have one).
+# Locks join the alarm here: an unlock is a security action, so a stolen
+# member login can't open a door without the PIN either.
+PIN_GATED_DOMAINS = {"alarm_control_panel", "lock"}
 from .. import allowlist
 from ..bridge import manager
 from ..config import get_settings
@@ -73,11 +78,11 @@ async def call_service(
     # be forwarded to HA in any service payload.
     pin = body.data.pop("pin", None)
 
-    # Arm/disarm PIN gate. Enforced here (not in the UI) so the API itself
-    # is protected; per-user, so the audit trail says WHO armed/disarmed.
+    # Arm/disarm + lock/unlock PIN gate. Enforced here (not in the UI) so the
+    # API itself is protected; per-user, so the audit trail says WHO did it.
     # Users without a PIN configured are not gated (set PINs for every
     # account that can reach a wall panel).
-    if domain == "alarm_control_panel" and user.pin_hash is not None:
+    if domain in PIN_GATED_DOMAINS and user.pin_hash is not None:
         ip = request.client.host if request.client else "?"
         check_rate_limit(f"pin:{user.username}", ip)
         if not pin:
@@ -473,31 +478,47 @@ async def put_device_config(body: dict, session: AsyncSession = Depends(get_sess
     return {"hidden": hidden, "icons": icons, "order": order, "board": board}
 
 
+# Layouts are PER LOGIN: the kitchen wall panel (its own kiosk account), a
+# tablet, and a phone each keep their own arrangement. A login with no
+# saved layout yet falls back to the shared/legacy layout (user_id NULL)
+# so existing panels keep their look until they're edited.
 @protected.get("/layouts/{panel_key}", response_model=LayoutOut)
-async def get_layout(panel_key: str, session: AsyncSession = Depends(get_session)) -> models.PanelLayout:
-    result = await session.execute(
+async def get_layout(
+    panel_key: str,
+    user: models.User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> models.PanelLayout:
+    mine = (await session.execute(
+        select(models.PanelLayout).where(
+            models.PanelLayout.panel_key == panel_key, models.PanelLayout.user_id == user.id
+        )
+    )).scalar_one_or_none()
+    if mine is not None:
+        return mine
+    shared = (await session.execute(
         select(models.PanelLayout).where(
             models.PanelLayout.panel_key == panel_key, models.PanelLayout.user_id.is_(None)
         )
-    )
-    layout = result.scalar_one_or_none()
-    if layout is None:
+    )).scalar_one_or_none()
+    if shared is None:
         raise HTTPException(404, f"no layout saved for panel: {panel_key}")
-    return layout
+    return shared
 
 
 @protected.put("/layouts/{panel_key}", response_model=LayoutOut)
 async def put_layout(
-    panel_key: str, body: LayoutIn, session: AsyncSession = Depends(get_session)
+    panel_key: str,
+    body: LayoutIn,
+    user: models.User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
 ) -> models.PanelLayout:
-    result = await session.execute(
+    layout = (await session.execute(
         select(models.PanelLayout).where(
-            models.PanelLayout.panel_key == panel_key, models.PanelLayout.user_id.is_(None)
+            models.PanelLayout.panel_key == panel_key, models.PanelLayout.user_id == user.id
         )
-    )
-    layout = result.scalar_one_or_none()
+    )).scalar_one_or_none()
     if layout is None:
-        layout = models.PanelLayout(panel_key=panel_key)
+        layout = models.PanelLayout(panel_key=panel_key, user_id=user.id)
         session.add(layout)
     layout.layout_json = body.layout_json
     await session.commit()

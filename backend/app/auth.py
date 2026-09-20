@@ -43,9 +43,15 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def session_ttl_days(user: models.User) -> int:
+    """Admins get a short session; everyone else the normal one."""
+    s = get_settings()
+    return s.admin_session_ttl_days if user.role == "admin" else s.session_ttl_days
+
+
 async def create_session(db: AsyncSession, user: models.User) -> str:
     token = secrets.token_urlsafe(32)
-    ttl = timedelta(days=get_settings().session_ttl_days)
+    ttl = timedelta(days=session_ttl_days(user))
     db.add(
         models.Session(
             token_hash=_hash_token(token),
@@ -87,12 +93,14 @@ async def destroy_user_sessions(db: AsyncSession, user_id: str) -> None:
     await db.commit()
 
 
-def set_session_cookie(response: Response, token: str) -> None:
+def set_session_cookie(response: Response, token: str, ttl_days: int | None = None) -> None:
     settings = get_settings()
+    if ttl_days is None:
+        ttl_days = settings.session_ttl_days
     response.set_cookie(
         COOKIE_NAME,
         token,
-        max_age=settings.session_ttl_days * 86400,
+        max_age=ttl_days * 86400,
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",

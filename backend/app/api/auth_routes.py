@@ -20,7 +20,7 @@ from .. import models
 from ..auth import (
     audit, check_rate_limit, clear_failures, clear_session_cookie,
     create_session, destroy_session, destroy_user_sessions, get_current_user,
-    hash_password, record_failure, require_admin, set_session_cookie,
+    hash_password, record_failure, require_admin, session_ttl_days, set_session_cookie,
     verify_password, COOKIE_NAME,
 )
 from ..db import get_session
@@ -64,7 +64,7 @@ async def setup(body: SetupIn, response: Response, db: AsyncSession = Depends(ge
     await db.commit()
     await db.refresh(user)
     await audit(db, user.username, "setup", "initial admin created")
-    set_session_cookie(response, await create_session(db, user))
+    set_session_cookie(response, await create_session(db, user), session_ttl_days(user))
     log.warning("Initial admin '%s' created via first-run setup", user.username)
     return user
 
@@ -86,7 +86,7 @@ async def login(
         raise HTTPException(401, "invalid credentials")
 
     clear_failures(username, ip)
-    set_session_cookie(response, await create_session(db, user))
+    set_session_cookie(response, await create_session(db, user), session_ttl_days(user))
     await audit(db, username, "login", f"ip={ip}")
     return user
 
@@ -100,6 +100,18 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
 @auth_router.get("/me", response_model=UserOut)
 async def me(user: models.User = Depends(get_current_user)) -> models.User:
     return user
+
+
+@auth_router.post("/logout-all", status_code=204)
+async def logout_all(
+    request: Request, response: Response,
+    user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> None:
+    """Sign this account out on EVERY device (lost phone, suspected theft)."""
+    await destroy_user_sessions(db, user.id)
+    clear_session_cookie(response)
+    await audit(db, user.username, "logout_all")
 
 
 @auth_router.post("/password", status_code=204)
@@ -154,12 +166,28 @@ async def create_user(
 async def patch_user(
     user_id: str,
     body: UserPatch,
+    request: Request,
     admin: models.User = Depends(require_admin),
     db: AsyncSession = Depends(get_session),
 ) -> models.User:
     user = await db.get(models.User, user_id)
     if user is None:
         raise HTTPException(404, "no such user")
+    # Step-up authentication: anything that changes a credential (role,
+    # password, PIN) requires the acting admin to re-enter THEIR password.
+    # This is what stops a stolen admin session from rewriting PINs.
+    sensitive = (body.role is not None or body.password is not None
+                 or body.pin is not None or bool(body.clear_pin))
+    if sensitive:
+        ip = request.client.host if request.client else "?"
+        check_rate_limit(f"reauth:{admin.username}", ip)
+        if not body.confirm_password:
+            raise HTTPException(403, "reauth_required")
+        if not verify_password(body.confirm_password, admin.password_hash):
+            record_failure(f"reauth:{admin.username}", ip)
+            await audit(db, admin.username, "reauth_failed", f"user_update {user.username}")
+            raise HTTPException(403, "reauth_invalid")
+        clear_failures(f"reauth:{admin.username}", ip)
     changes: list[str] = []
     if body.role is not None:
         if body.role not in ("admin", "member", "kiosk"):
@@ -195,6 +223,20 @@ async def patch_user(
     await db.refresh(user)
     await audit(db, admin.username, "user_updated", f"{user.username}: {', '.join(changes) or 'no-op'}")
     return user
+
+
+@admin_router.post("/users/{user_id}/logout-all", status_code=204)
+async def admin_logout_all(
+    user_id: str,
+    admin: models.User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+) -> None:
+    """Revoke every session for an account (lost device, suspected theft)."""
+    user = await db.get(models.User, user_id)
+    if user is None:
+        raise HTTPException(404, "no such user")
+    await destroy_user_sessions(db, user.id)
+    await audit(db, admin.username, "logout_all_user", user.username)
 
 
 # -- admin: audit log --------------------------------------------------------
@@ -375,6 +417,12 @@ SETTING_KEYS = {
     # weather source override: an HA weather.* entity_id; blank = auto-detect
     # the first weather entity HA exposes (see /api/weather)
     "weather_entity",
+    # alarm countdown lengths (seconds) shown by the panel overlay. HA's
+    # manual alarm panel does not expose seconds-remaining, so these must
+    # match arming_time / delay_time per mode in configuration.yaml.
+    "alarm_exit_away", "alarm_entry_away",
+    "alarm_exit_home", "alarm_entry_home",
+    "alarm_exit_night", "alarm_entry_night",
 }
 
 

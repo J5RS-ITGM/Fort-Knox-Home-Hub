@@ -21,6 +21,7 @@ import { createPortal } from "react-dom";
 import { callService, Entity, ServiceError } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
 import { useMe } from "@/lib/auth";
+import PinPad from "@/components/PinPad";
 
 const ALARM_ENTITY = "alarm_control_panel.homehub";
 
@@ -245,93 +246,6 @@ function ArmTypePrompt({ onPick, onCancel }: { onPick: (m: ArmMode) => void; onC
         <button onClick={onCancel}
           style={{ marginTop: 4, padding: "10px 0", background: "transparent", border: "none",
                    color: C.sub, fontSize: 13, cursor: "pointer" }}>Cancel</button>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-/** Touch-first numeric keypad overlay (wall-panel friendly). The PIN is
- *  verified server-side; this only collects digits. */
-function PinPad({
-  title, tone, error, busy, onSubmit, onCancel,
-}: {
-  title: string; tone: string; error: string; busy: boolean;
-  onSubmit: (pin: string) => void; onCancel: () => void;
-}) {
-  const [pin, setPin] = useState("");
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  useEffect(() => { if (error) setPin(""); }, [error]);
-
-  const press = (d: string) => setPin((p) => (p.length < 8 ? p + d : p));
-  const back = () => setPin((p) => p.slice(0, -1));
-
-  const key = (label: string, onClick: () => void, wide = false) => (
-    <button
-      key={label}
-      onClick={onClick}
-      disabled={busy}
-      style={{
-        gridColumn: wide ? "span 2" : undefined,
-        padding: "22px 0", fontSize: 26, fontWeight: 700,
-        color: C.ink, background: "#1a2330", border: `1px solid ${C.line}`,
-        borderRadius: 15, cursor: "pointer", touchAction: "manipulation",
-      }}
-    >
-      {label}
-    </button>
-  );
-
-  if (!mounted) return null;
-  return createPortal(
-    <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center",
-        overflowY: "auto", padding: 16, background: "rgba(8,10,14,0.82)", backdropFilter: "blur(6px)",
-      }}
-      onClick={onCancel}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "100%", maxWidth: 320, padding: 24, borderRadius: 20,
-          background: C.field, border: `1px solid ${C.line}`,
-          display: "flex", flexDirection: "column", gap: 14,
-        }}
-      >
-        <div style={{ fontSize: 17, fontWeight: 600, color: tone, textAlign: "center" }}>{title}</div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 12, minHeight: 16 }}>
-          {Array.from({ length: Math.max(pin.length, 4) }).map((_, i) => (
-            <span key={i} style={{
-              width: 15, height: 15, borderRadius: 15,
-              background: i < pin.length ? tone : "transparent",
-              border: `2px solid ${i < pin.length ? tone : C.line}`,
-            }} />
-          ))}
-        </div>
-        <div style={{ minHeight: 16, fontSize: 12, color: C.alert, textAlign: "center", fontWeight: 600 }}>
-          {error}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-          {["1","2","3","4","5","6","7","8","9"].map((d) => key(d, () => press(d)))}
-          {key("⌫", back)}
-          {key("0", () => press("0"))}
-          {key("✕", onCancel)}
-        </div>
-        <button
-          onClick={() => onSubmit(pin)}
-          disabled={busy || pin.length < 4}
-          style={{
-            padding: "16px 0", fontSize: 16, fontWeight: 800, borderRadius: 14,
-            background: pin.length >= 4 ? tone : "#161b26",
-            color: pin.length >= 4 ? C.field : C.sub,
-            border: `1px solid ${pin.length >= 4 ? tone : C.line}`,
-            cursor: pin.length >= 4 ? "pointer" : "default", touchAction: "manipulation",
-          }}
-        >
-          {busy ? "Checking…" : "Confirm"}
-        </button>
       </div>
     </div>,
     document.body

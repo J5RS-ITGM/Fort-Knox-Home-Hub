@@ -8,11 +8,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { LogOut, Menu, MonitorSmartphone, Settings, X } from "lucide-react";
+import { LogOut, Menu, MonitorSmartphone, Settings, ShieldOff, X } from "lucide-react";
 import KioskGate from "@/components/KioskGate";
 import AlarmControl from "@/components/AlarmControl";
 import { Lamp } from "@/components/Lamp";
-import { logout, useMe , isKiosk } from "@/lib/auth";
+import { logout, logoutAll, useMe , isKiosk } from "@/lib/auth";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 const NAV: [string, string][] = [
@@ -62,13 +62,13 @@ export default function AppHeader() {
   const nav = NAV;
 
   return (
-    <header ref={headerRef} className="sticky top-0 z-20 hidden border-b border-line bg-field/90 backdrop-blur sm:block">
+    <header ref={headerRef} className="sticky top-0 z-20 hidden border-b border-line bg-field/90 backdrop-blur tb:block">
       <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3">
         {/* Row 1 — brand · status · alarm · account */}
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 tb:gap-4">
           {/* mobile menu button */}
           <button onClick={() => setMenu(true)} aria-label="Menu"
-                  className="grid size-9 shrink-0 place-items-center rounded-lg border border-line text-ink-muted sm:hidden">
+                  className="grid size-9 shrink-0 place-items-center rounded-lg border border-line text-ink-muted tb:hidden">
             <Menu size={18} />
           </button>
 
@@ -77,35 +77,39 @@ export default function AppHeader() {
           </h1>
 
           {/* status dots — labels hidden on mobile to save room */}
-          <div className="ml-auto flex items-center gap-2 text-[11px] text-ink-muted sm:gap-3">
-            <span className="flex items-center gap-1.5"><Lamp on={linkUp} alert={!linkUp} /><span className="hidden sm:inline">App</span></span>
-            <span className="flex items-center gap-1.5"><Lamp on={bridgeUp} alert={!bridgeUp} /><span className="hidden sm:inline">Bridge</span></span>
+          <div className="ml-auto flex items-center gap-2 text-[11px] text-ink-muted tb:gap-3">
+            <span className="flex items-center gap-1.5"><Lamp on={linkUp} alert={!linkUp} /><span className="hidden tb:inline">App</span></span>
+            <span className="flex items-center gap-1.5"><Lamp on={bridgeUp} alert={!bridgeUp} /><span className="hidden tb:inline">Bridge</span></span>
           </div>
 
-          <div className="hidden h-5 w-px bg-line sm:block" />
+          <div className="hidden h-5 w-px bg-line tb:block" />
 
           <AlarmControl variant="bar" />
 
           {/* account icons — hidden on mobile (they live in the drawer) */}
           {isAdmin && (
             <a href="/admin" aria-label="Admin"
-               className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink sm:grid">
+               className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink tb:grid">
               <Settings size={17} />
             </a>
           )}
           <button onClick={() => setGate(true)} aria-label="Enter kiosk mode" title="Enter kiosk mode"
-                  className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink sm:grid">
+                  className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink tb:grid">
             <MonitorSmartphone size={17} />
           </button>
+          <button onClick={() => logoutAll()} aria-label="Sign out everywhere" title="Sign out on every device"
+                  className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-alert/50 hover:text-ink tb:grid">
+            <ShieldOff size={17} />
+          </button>
           <button onClick={() => logout()} aria-label="Sign out"
-                  className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-alert/50 hover:text-ink sm:grid">
+                  className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-alert/50 hover:text-ink tb:grid">
             <LogOut size={17} />
           </button>
           {gate && <KioskGate mode="enter" onClose={() => setGate(false)} />}
         </div>
 
         {/* Row 2 — full nav strip, DESKTOP ONLY (mobile uses the drawer) */}
-        <nav className="hidden gap-1 rounded-xl border border-line bg-panel p-1 sm:flex">
+        <nav className="hidden gap-1 rounded-xl border border-line bg-panel p-1 tb:flex">
           {nav.map(([href, label]) => {
             const active = pathname === href;
             return (
@@ -122,7 +126,7 @@ export default function AppHeader() {
 
       {/* Mobile nav drawer */}
       {menu && (
-        <div className="fixed inset-0 z-[60] bg-black/60 sm:hidden" onClick={() => setMenu(false)}>
+        <div className="fixed inset-0 z-[60] bg-black/60 tb:hidden" onClick={() => setMenu(false)}>
           <div className="absolute left-0 top-0 flex h-full w-64 flex-col gap-1 border-r border-line bg-field p-3" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between px-1">
               <span className="font-[family-name:var(--font-display)] text-lg font-semibold">Home<span className="text-lamp">Hub</span></span>
@@ -138,6 +142,7 @@ export default function AppHeader() {
               {isAdmin && <a href="/admin" className="block rounded-lg px-3 py-3 text-sm text-ink-muted">Admin</a>}
               <button onClick={() => { setMenu(false); setGate(true); }} className="block w-full rounded-lg px-3 py-3 text-left text-sm text-ink-muted">Enter kiosk mode</button>
               <button onClick={() => logout()} className="block w-full rounded-lg px-3 py-3 text-left text-sm text-ink-muted">Sign out</button>
+              <button onClick={() => logoutAll()} className="block w-full rounded-lg px-3 py-3 text-left text-sm text-ink-muted">Sign out everywhere</button>
             </div>
           </div>
         </div>

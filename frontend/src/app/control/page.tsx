@@ -4,6 +4,7 @@
  *  live entities from the HA bridge; toggles and dims via the allowlisted
  *  service proxy. Grouped by type; dimmable lights get a brightness slider. */
 
+import { usePinGate } from "@/lib/pinGate";
 import { useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { callService, Entity } from "@/lib/api";
@@ -72,10 +73,11 @@ export default function ControlPage() {
 
   // Explicit lock/unlock (never toggle): lock.toggle isn't allowlisted, and a
   // deadbolt action should always be unambiguous about direction.
+  const { run: runPin, pad: lockPinPad } = usePinGate();
   const lockAction = async (e: Entity, service: "lock" | "unlock") => {
+    const name = String(e.attributes?.friendly_name ?? e.entity_id);
     mark(e.entity_id, true);
-    try { await callService("lock", service, e.entity_id); }
-    catch (err) { console.error(err); }
+    try { await runPin(`PIN to ${service} · ${name}`, (pin) => callService("lock", service, e.entity_id, pin ? { pin } : {})); }
     finally { setTimeout(() => mark(e.entity_id, false), 400); }
   };
 
@@ -166,6 +168,7 @@ export default function ControlPage() {
 
   return (
     <PageShell title="Control" active="/control">
+      {lockPinPad}
       {!linkUp && (
         <p className="mb-6 rounded-md border border-alert/40 bg-panel p-3 text-sm text-ink-muted">
           Reconnecting to the HomeHub backend…

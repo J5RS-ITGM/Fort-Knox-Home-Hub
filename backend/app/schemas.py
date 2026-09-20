@@ -97,6 +97,10 @@ class UserPatch(BaseModel):
     display_name: str | None = None
     pin: str | None = None        # set a new arm/disarm PIN (4-8 digits)
     clear_pin: bool | None = None  # true -> remove the PIN
+    # Step-up auth: required (and verified against the ADMIN's own password)
+    # whenever role, password, pin, or clear_pin is being changed. A stolen
+    # session cookie alone cannot change credentials.
+    confirm_password: str | None = None
 
 
 class AuditOut(BaseModel):

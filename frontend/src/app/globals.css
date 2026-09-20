@@ -62,6 +62,10 @@
 }
 
 @theme inline {
+  /* "tb" = the phone/portrait-tablet -> landscape-tablet/desktop switch.
+     Phones and portrait tablets get the stacked layout + bottom tabs;
+     landscape tablets and the wall panels get the grid + top header. */
+  --breakpoint-tb: 56.25rem;
   --color-field: var(--color-field);
   --color-panel: var(--color-panel);
   --color-panel-raised: var(--color-panel-raised);
@@ -98,6 +102,12 @@ body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+/* Nothing may widen the page: media scales down, wide content (tables,
+   code) scrolls inside its own box, never the viewport. */
+img, video, canvas, svg { max-width: 100%; height: auto; }
+pre { max-width: 100%; overflow-x: auto; }
+table { max-width: 100%; }
+.hh-scroll-x { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -137,9 +147,9 @@ body {
 }
 
 /* Mobile nav spacing: on phones, reserve room for the fixed top alarm bar
-   and bottom tab bar (see MobileNav). Desktop (sm+) uses AppHeader instead
+   and bottom tab bar (see MobileNav). Desktop (tb+, 900px) uses AppHeader instead
    and needs no padding. */
-@media (max-width: 639px) {
+@media (max-width: 899px) {
   .mobile-nav-pad {
     padding-top: calc(56px + env(safe-area-inset-top));
     padding-bottom: calc(62px + env(safe-area-inset-bottom));
@@ -151,7 +161,7 @@ body {
    carry no inline `display`, so these rules fully control visibility. */
 .panel-stack-mobile { display: none; }
 .panel-grid-desktop { display: block; }
-@media (max-width: 639px) {
+@media (max-width: 899px) {
   .panel-stack-mobile { display: flex; }
   .panel-grid-desktop { display: none; }
 }

@@ -96,6 +96,17 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
   const [nu, setNu] = useState({ username: "", password: "", display_name: "", role: "member" });
   const patch = (id: string, body: Record<string, unknown>) =>
     act(() => api(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }));
+  // Credential changes (role, password, PIN) need step-up auth: the server
+  // refuses them unless the acting admin re-enters THEIR OWN password.
+  const patchSensitive = (id: string, body: Record<string, unknown>) => {
+    const confirm_password = window.prompt("Confirm YOUR admin password to make this change:");
+    if (!confirm_password) return Promise.resolve(false);
+    return patch(id, { ...body, confirm_password });
+  };
+  const signOutEverywhere = (u: User) => {
+    if (!window.confirm(`Sign ${u.username} out on every device?`)) return;
+    void act(() => api(`/api/admin/users/${u.id}/logout-all`, { method: "POST" }));
+  };
   return (
     <section>
       <h2 className={sectionTitle}>Login accounts</h2>
@@ -114,27 +125,30 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
                 <td className="px-3 py-2.5">
                   <div className="flex flex-wrap gap-1.5">
                     <select disabled={busy} className={`${btn} cursor-pointer`} value={u.role}
-                            onChange={(e) => patch(u.id, { role: e.target.value })}>
+                            onChange={(e) => patchSensitive(u.id, { role: e.target.value })}>
                       <option value="member">member</option>
                       <option value="admin">admin</option>
                     </select>
                     <button disabled={busy} className={btn} onClick={() => patch(u.id, { disabled: !u.disabled })}>
                       {u.disabled ? "Enable" : "Disable"}
                     </button>
-                    <button disabled={busy} className={btn} onClick={() => { const pw = window.prompt(`New password for ${u.username} (10+ chars):`); if (pw) patch(u.id, { password: pw }); }}>
+                    <button disabled={busy} className={btn} onClick={() => { const pw = window.prompt(`New password for ${u.username} (10+ chars):`); if (pw) patchSensitive(u.id, { password: pw }); }}>
                       Reset password
                     </button>
                     <button disabled={busy} className={btn} onClick={() => {
                       const pin = window.prompt(`Arm/disarm PIN for ${u.username} (4-8 digits):`);
                       if (pin === null) return;
                       if (!/^\d{4,8}$/.test(pin)) { window.alert("PIN must be 4-8 digits"); return; }
-                      patch(u.id, { pin });
+                      patchSensitive(u.id, { pin });
                     }}>
                       {u.pin_set ? "Change PIN" : "Set PIN"}
                     </button>
+                    <button disabled={busy} className={btn} onClick={() => signOutEverywhere(u)} title="Revoke every session for this account">
+                      Sign out everywhere
+                    </button>
                     {u.pin_set && (
                       <button disabled={busy} className={btn} onClick={() => {
-                        if (window.confirm(`Remove ${u.username}'s alarm PIN? They will arm/disarm without one.`)) patch(u.id, { clear_pin: true });
+                        if (window.confirm(`Remove ${u.username}'s alarm PIN? They will arm/disarm without one.`)) patchSensitive(u.id, { clear_pin: true });
                       }}>
                         Clear PIN
                       </button>
@@ -507,6 +521,31 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
         </div>
         <p className="text-[11px] text-ink-muted">Armed alerts always stay until acknowledged. Changes reach open panels within a minute.</p>
 
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Alarm countdowns</h3>
+        <p className="-mt-1 text-[11px] text-ink-muted">
+          Seconds shown on the panel&apos;s arming / entry-delay overlay. Home Assistant doesn&apos;t report time remaining, so
+          these must match <code>arming_time</code> (exit) and <code>delay_time</code> (entry) per mode in configuration.yaml.
+        </p>
+        <div className="grid max-w-md grid-cols-3 gap-3">
+          {([["away","Away"],["home","Home"],["night","Night"]] as [string,string][]).map(([m, label]) => (
+            <div key={m} className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3">
+              <span className="text-xs font-semibold">{label}</span>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-ink-muted">Exit (arming)</span>
+                <input type="number" min={0} max={600} className={input}
+                  value={form[`alarm_exit_${m}`] ?? ""} placeholder={m === "home" ? "0" : "30"}
+                  onChange={(e) => setForm({ ...form, [`alarm_exit_${m}`]: e.target.value })} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-ink-muted">Entry delay</span>
+                <input type="number" min={0} max={600} className={input}
+                  value={form[`alarm_entry_${m}`] ?? ""} placeholder={m === "night" ? "10" : "30"}
+                  onChange={(e) => setForm({ ...form, [`alarm_entry_${m}`]: e.target.value })} />
+              </label>
+            </div>
+          ))}
+        </div>
+
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Per-sensor alert rules</h3>
         <p className="-mt-1 text-[11px] text-ink-muted">
           Override the global setting per sensor — e.g. set daytime-noisy motion sensors to &quot;Only while armed&quot;.
@@ -614,7 +653,8 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           onClick={() => {
             // send ONLY known editable fields — never echo back whatever the
             // GET returned (defense in depth against key leakage)
-            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules", "theme_mode", "theme_accent", "security_view"];
+            const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules", "theme_mode", "theme_accent", "security_view",
+              "alarm_exit_away", "alarm_entry_away", "alarm_exit_home", "alarm_entry_home", "alarm_exit_night", "alarm_entry_night"];
             const values = Object.fromEntries(keys.map((key) => [key, form[key] ?? ""]));
             act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values }) }));
           }}>
