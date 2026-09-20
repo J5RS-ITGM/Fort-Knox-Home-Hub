@@ -6,6 +6,7 @@
  *  can reach every function without hunting for header links. */
 
 import { useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CalendarDays, ChefHat, Images, LayoutGrid, ListChecks, ListTodo, LockOpen, Shield, SlidersHorizontal, Wrench } from "lucide-react";
 import KioskGate from "@/components/KioskGate";
@@ -52,9 +53,10 @@ export default function BottomTabs() {
       {tabs.map(({ href, label, Icon }) => {
         const active = pathname === href;
         return (
-          <a
+          <Link
             key={href}
             href={href}
+            prefetch
             style={{
               flex: 1, display: "flex", flexDirection: "column",
               alignItems: "center", justifyContent: "center", gap: 3,
@@ -68,7 +70,7 @@ export default function BottomTabs() {
           >
             <Icon size={20} strokeWidth={active ? 2.4 : 2} />
             {label}
-          </a>
+          </Link>
         );
       })}
       <button

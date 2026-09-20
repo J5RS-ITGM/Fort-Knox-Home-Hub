@@ -7,6 +7,7 @@
  *  Kiosk sessions get a trimmed set (no Home, Admin, or Sign out). */
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut, Menu, MonitorSmartphone, Settings, ShieldOff, X } from "lucide-react";
 import KioskGate from "@/components/KioskGate";
@@ -88,10 +89,10 @@ export default function AppHeader() {
 
           {/* account icons — hidden on mobile (they live in the drawer) */}
           {isAdmin && (
-            <a href="/admin" aria-label="Admin"
+            <Link href="/admin" aria-label="Admin"
                className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink tb:grid">
               <Settings size={17} />
-            </a>
+            </Link>
           )}
           <button onClick={() => setGate(true)} aria-label="Enter kiosk mode" title="Enter kiosk mode"
                   className="hidden size-9 place-items-center rounded-lg border border-line text-ink-muted transition-colors hover:border-lamp/50 hover:text-ink tb:grid">
@@ -113,12 +114,12 @@ export default function AppHeader() {
           {nav.map(([href, label]) => {
             const active = pathname === href;
             return (
-              <a key={href} href={href}
+              <Link key={href} href={href} prefetch
                  className={`flex-1 rounded-lg py-2 text-center text-xs font-medium transition-colors ${
                    active ? "bg-panel-raised text-ink" : "text-ink-muted hover:text-ink"
                  }`}>
                 {label}
-              </a>
+              </Link>
             );
           })}
         </nav>
@@ -133,13 +134,13 @@ export default function AppHeader() {
               <button onClick={() => setMenu(false)} aria-label="Close" className="text-ink-muted"><X size={20} /></button>
             </div>
             {nav.map(([href, label]) => (
-              <a key={href} href={href}
+              <Link key={href} href={href} onClick={() => setMenu(false)}
                  className={`rounded-lg px-3 py-3 text-sm font-medium ${pathname === href ? "bg-panel-raised text-ink" : "text-ink-muted"}`}>
                 {label}
-              </a>
+              </Link>
             ))}
             <div className="mt-2 border-t border-line pt-2">
-              {isAdmin && <a href="/admin" className="block rounded-lg px-3 py-3 text-sm text-ink-muted">Admin</a>}
+              {isAdmin && <Link href="/admin" onClick={() => setMenu(false)} className="block rounded-lg px-3 py-3 text-sm text-ink-muted">Admin</Link>}
               <button onClick={() => { setMenu(false); setGate(true); }} className="block w-full rounded-lg px-3 py-3 text-left text-sm text-ink-muted">Enter kiosk mode</button>
               <button onClick={() => logout()} className="block w-full rounded-lg px-3 py-3 text-left text-sm text-ink-muted">Sign out</button>
               <button onClick={() => logoutAll()} className="block w-full rounded-lg px-3 py-3 text-left text-sm text-ink-muted">Sign out everywhere</button>

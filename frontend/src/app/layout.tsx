@@ -4,6 +4,7 @@ import SWRegister from "@/components/SWRegister";
 import SensorFlash from "@/components/SensorFlash";
 import ThemeProvider from "@/components/ThemeProvider";
 import MobileNav from "@/components/MobileNav";
+import BottomTabs from "@/components/BottomTabs";
 import KioskKeyboard from "@/components/KioskKeyboard";
 import { themeBootScript } from "@/lib/theme";
 
@@ -35,6 +36,10 @@ export default function RootLayout({
         <SWRegister />
         <SensorFlash />
         <MobileNav />
+        {/* Kiosk bottom tabs live here (not per page) so they persist across
+            navigation instead of unmounting/remounting with each screen.
+            Below the tb breakpoint MobileNav's bar is used instead. */}
+        <div className="hidden tb:block"><BottomTabs /></div>
         <div className="mobile-nav-pad">{children}</div>
         <KioskKeyboard />
       </body>

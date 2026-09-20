@@ -8,6 +8,7 @@
  *  No horizontal scrolling anywhere. */
 
 import { useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity, CalendarDays, ChefHat, Images, LayoutGrid, ListChecks, ListTodo,
@@ -66,7 +67,7 @@ export default function MobileNav() {
     };
     return onClick
       ? <button key={label} onClick={onClick} style={style} aria-label={label}>{inner}</button>
-      : <a key={label} href={href} style={style}>{inner}</a>;
+      : <Link key={label} href={href} prefetch style={style}>{inner}</Link>;
   };
 
   return (
@@ -125,7 +126,7 @@ export default function MobileNav() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
               {MORE.map(([href, label, Icon]) => (
-                <a key={href} href={href}
+                <Link key={href} href={href} onClick={() => setMore(false)}
                    style={{
                      display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
                      padding: "16px 8px", borderRadius: 12, textDecoration: "none",
@@ -134,11 +135,11 @@ export default function MobileNav() {
                      color: pathname === href ? "var(--color-lamp)" : "var(--color-ink)",
                    }}>
                   <Icon size={22} /><span style={{ fontSize: 12, fontWeight: 500 }}>{label}</span>
-                </a>
+                </Link>
               ))}
             </div>
             <div style={{ marginTop: 14, borderTop: "1px solid var(--color-line)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-              {isAdmin && <a href="/admin" style={{ padding: "12px 8px", borderRadius: 10, textDecoration: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Admin</a>}
+              {isAdmin && <Link href="/admin" onClick={() => setMore(false)} style={{ padding: "12px 8px", borderRadius: 10, textDecoration: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Admin</Link>}
               {!kiosk && <button onClick={() => { setMore(false); setGate(true); }} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Enter kiosk mode</button>}
               {!kiosk && <button onClick={() => logout()} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Sign out</button>}
               {!kiosk && <button onClick={() => logoutAll()} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Sign out everywhere</button>}

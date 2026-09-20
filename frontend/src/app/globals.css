@@ -93,14 +93,15 @@ html {
    including in the installed PWA (standalone display mode), where the
    default scroll container behaves differently than in the browser. */
 html {
-  height: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 body {
   max-width: 100%;
-  min-height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  min-height: 100dvh;
+  /* `clip` hides sideways overflow WITHOUT turning body into a scroll
+     container (which is what unpinned the fixed bottom bar on tablets). */
+  overflow-x: clip;
 }
 /* Nothing may widen the page: media scales down, wide content (tables,
    code) scrolls inside its own box, never the viewport. */
@@ -108,6 +109,12 @@ img, video, canvas, svg { max-width: 100%; height: auto; }
 pre { max-width: 100%; overflow-x: auto; }
 table { max-width: 100%; }
 .hh-scroll-x { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Page transition: the persistent bars (MobileNav / kiosk BottomTabs) stay
+   put; only the route content fades in. */
+@keyframes hh-page-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.hh-page-enter { animation: hh-page-enter .18s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .hh-page-enter { animation: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   *,

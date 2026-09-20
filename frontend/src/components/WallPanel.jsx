@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { API_URL, callService } from "@/lib/api";
 import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardState, snapToWall, gridFromPlan, planFromGrid } from "@/lib/planScene";
-import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
+import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
 import AlarmOverlay from "@/components/AlarmOverlay";
@@ -1096,9 +1096,11 @@ export default function WallPanel() {
     // a fixed dashboard. On mobile the panel is a normal scrolling page —
     // locking the body there is exactly what broke vertical scrolling.
     if (window.innerWidth < 900) return;
-    const prev = { o:document.body.style.overflow, ob:document.body.style.overscrollBehavior, m:document.body.style.margin };
+    const html = document.documentElement;
+    const prev = { o:document.body.style.overflow, ob:document.body.style.overscrollBehavior, m:document.body.style.margin, ho:html.style.overflow };
     document.body.style.overflow="hidden"; document.body.style.overscrollBehavior="none"; document.body.style.margin="0";
-    return ()=>{ document.body.style.overflow=prev.o; document.body.style.overscrollBehavior=prev.ob; document.body.style.margin=prev.m; };
+    html.style.overflow="hidden";
+    return ()=>{ document.body.style.overflow=prev.o; document.body.style.overscrollBehavior=prev.ob; document.body.style.margin=prev.m; html.style.overflow=prev.ho; };
   },[]);
 
   const summary = useMemo(()=>{
@@ -1711,10 +1713,12 @@ export default function WallPanel() {
             <span style={{fontSize:11, color:C.sub, minWidth:32, textAlign:"center"}}>{Math.round(textScale*100)}%</span>
             <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:800, cursor:"pointer" }}>A+</button>
           </>)}
-          <button onClick={()=>{ void openFrame(); }} aria-label="Play gallery slideshow"
-            style={{ display:"flex", alignItems:"center", background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 11px", cursor:"pointer" }}>
-            <Play size={14}/>
-          </button>
+          {kiosk && (
+            <button onClick={()=>{ void openFrame(); }} aria-label="Play gallery slideshow"
+              style={{ display:"flex", alignItems:"center", background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 11px", cursor:"pointer" }}>
+              <Play size={14}/>
+            </button>
+          )}
           <button onClick={()=>setArrange(a=>!a)} aria-label="Arrange cards"
             style={{ display:"flex", alignItems:"center", gap:6, background: arrange?C.accent:C.cardHi, color: arrange?C.bg0:C.sub, border:`1px solid ${arrange?C.accent:C.edge}`, borderRadius:10, padding:"8px 11px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
             <Settings2 size={14}/>{arrange?"Done":"Arrange"}
@@ -1726,10 +1730,12 @@ export default function WallPanel() {
               <span style={{fontSize:11, color:C.sub, minWidth:34, textAlign:"center"}}>{Math.round(textScale*100)}%</span>
               <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"9px 12px", fontSize:14, fontWeight:800, cursor:"pointer" }}>A+</button>
             </>)}
-            <button onClick={()=>{ void openFrame(); }} aria-label="Play gallery slideshow" title="Play the gallery like a photo frame"
-              style={{ display:"flex", alignItems:"center", gap:8, background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-              <Play size={16}/> Photos
-            </button>
+            {kiosk && (
+              <button onClick={()=>{ void openFrame(); }} aria-label="Play gallery slideshow" title="Play the gallery like a photo frame"
+                style={{ display:"flex", alignItems:"center", gap:8, background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+                <Play size={16}/> Photos
+              </button>
+            )}
             {canGridEdit && (
               <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
                 <Settings2 size={17}/>{edit?"Done":"Edit"}
@@ -1924,7 +1930,6 @@ export default function WallPanel() {
           borderRadius:12, padding:"10px 16px", fontSize:14, fontWeight:700, boxShadow:"0 10px 30px rgba(0,0,0,.45)",
           maxWidth:"calc(100vw - 24px)", overflowWrap:"anywhere" }}>{toast.text}</div>
       )}
-      <BottomTabs/>
       <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>
   </>);
