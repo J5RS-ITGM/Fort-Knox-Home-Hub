@@ -65,8 +65,10 @@ type Cmd = "arm" | "disarm" | null;
 
 export default function AlarmControl({
   variant = "bar",
+  disarmSignal = 0,
 }: {
   variant?: "bar" | "compact";
+  disarmSignal?: number;
 }) {
   const { entities } = useHomeHub();
   const { me } = useMe();
@@ -124,6 +126,14 @@ export default function AlarmControl({
     if (me?.pin_set) { setPinError(""); setPinFor({ wantArmed: false }); }
     else void dispatch(false);
   };
+
+  // External disarm request (e.g. the panel's alarm overlay): run the same
+  // flow a Disarm press would — opens the PIN pad if one is set. Ignore the
+  // initial 0 so it doesn't fire on mount.
+  useEffect(() => {
+    if (disarmSignal > 0) send(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disarmSignal]);
 
   // A mode was chosen from the arm-type prompt.
   const chooseMode = (mode: ArmMode) => {

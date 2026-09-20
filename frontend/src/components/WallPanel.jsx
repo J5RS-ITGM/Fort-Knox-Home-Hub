@@ -12,6 +12,7 @@ import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardSta
 import BottomTabs, { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
+import AlarmOverlay from "@/components/AlarmOverlay";
 import AppHeader from "@/components/AppHeader";
 import Slideshow from "@/components/Slideshow";
 import { isKiosk, useMe } from "@/lib/auth";
@@ -911,6 +912,9 @@ export default function WallPanel() {
 
   const [showRadar, setShowRadar] = useState(false);
   const [edit, setEdit] = useState(false);
+  // Bumped by the alarm overlay's Disarm button; AlarmControl watches it and
+  // opens the PIN pad (or disarms) exactly as its own Disarm press would.
+  const [disarmSignal, setDisarmSignal] = useState(0);
   // Gallery frame mode, launched straight from the panel: fetch the photo
   // list on demand and hand it to the shared Slideshow overlay.
   const [framePhotos, setFramePhotos] = useState(null); // null = closed
@@ -1639,6 +1643,7 @@ export default function WallPanel() {
   return (<>
     <AppHeader />
     <div style={{ fontFamily:"'DM Sans', system-ui, sans-serif",
+      position:"relative",
       minHeight: "calc(100dvh - var(--fk-menu-h, 0px))",
       width: "100%", maxWidth:"100%",
       background:`radial-gradient(1400px 900px at 75% -15%, ${C.bg1}, ${C.bg0})`, color:C.text,
@@ -1701,7 +1706,7 @@ export default function WallPanel() {
             <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
               <Settings2 size={17}/>{edit?"Done":"Edit"}
             </button>
-            <AlarmControl variant="compact" />
+            <AlarmControl variant="compact" disarmSignal={disarmSignal} />
           </div>
         )}
       </div>
@@ -1863,6 +1868,7 @@ export default function WallPanel() {
         </div>
       )}
       {framePhotos !== null && <Slideshow photos={framePhotos} onClose={()=>setFramePhotos(null)} />}
+      <AlarmOverlay alarm={alarm} entities={entities} onDisarm={()=>setDisarmSignal((n)=>n+1)} />
       <BottomTabs/>
       <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>

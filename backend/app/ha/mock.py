@@ -25,7 +25,7 @@ def _now() -> datetime:
 SEED: list[dict[str, Any]] = [
     # Alarm
     {"entity_id": "alarm_control_panel.homehub", "state": "disarmed",
-     "attributes": {"friendly_name": "HomeHub Alarm", "supported_modes": ["armed_home", "armed_away"]}},
+     "attributes": {"friendly_name": "HomeHub Alarm", "supported_modes": ["armed_home", "armed_away", "armed_night"]}},
     # Contacts — Zooz ZSE41
     {"entity_id": "binary_sensor.front_door_contact", "state": "off",
      "attributes": {"friendly_name": "Front Door", "device_class": "door", "model": "Zooz ZSE41", "battery": 96}},
@@ -230,12 +230,52 @@ class MockHA:
             elif service == "stop_cover":
                 pass
         elif domain == "alarm_control_panel":
-            mapping = {
-                "alarm_disarm": "disarmed",
-                "alarm_arm_home": "armed_home",
-                "alarm_arm_away": "armed_away",
-            }
-            state = mapping.get(service, state)
+            # Realistic-ish transitions so the panel's arming (yellow) and
+            # triggered (red) overlays are testable in mock mode.
+            #   arm_*  -> brief "arming" (exit delay) then the armed_* state
+            #   disarm -> "disarmed", clears changed_by
+            #   alarm_trigger(entity_id=<sensor>) -> "pending" (entry delay)
+            #     then "triggered", recording the sensor in changed_by
+            import asyncio
+
+            if service == "alarm_disarm":
+                attrs.pop("changed_by", None)
+                await cache.apply(Entity(entity_id, "disarmed", attrs))
+                return
+            if service in ("alarm_arm_home", "alarm_arm_away", "alarm_arm_night"):
+                target = {"alarm_arm_home": "armed_home", "alarm_arm_away": "armed_away",
+                          "alarm_arm_night": "armed_night"}[service]
+                exit_delay = 30
+                arming_attrs = dict(attrs); arming_attrs["delay"] = exit_delay
+                await cache.apply(Entity(entity_id, "arming", arming_attrs))
+
+                async def _finish_arm():
+                    await asyncio.sleep(exit_delay)
+                    cur = cache.get(entity_id)
+                    if cur and cur.state == "arming":
+                        na = dict(cur.attributes); na.pop("delay", None)
+                        await cache.apply(Entity(entity_id, target, na))
+                asyncio.create_task(_finish_arm())
+                return
+            if service == "alarm_trigger":
+                # test hook: data may carry the offending sensor's entity_id/name
+                sensor = data.get("sensor") or data.get("changed_by") or "binary_sensor.front_door_contact"
+                entry_delay = int(data.get("entry_delay", 10))
+                pa = dict(attrs); pa["changed_by"] = sensor; pa["delay"] = entry_delay
+                await cache.apply(Entity(entity_id, "pending", pa))
+
+                async def _finish_trigger():
+                    await asyncio.sleep(entry_delay)
+                    cur = cache.get(entity_id)
+                    if cur and cur.state == "pending":
+                        na = dict(cur.attributes); na.pop("delay", None)
+                        na["changed_by"] = sensor
+                        await cache.apply(Entity(entity_id, "triggered", na))
+                asyncio.create_task(_finish_trigger())
+                return
+            # unknown service: leave state unchanged
+            await cache.apply(Entity(entity_id, state, attrs))
+            return
         elif domain == "climate" and service == "set_temperature":
             attrs.update({k: v for k, v in data.items() if k in ("temperature", "target_temp_low", "target_temp_high")})
 
