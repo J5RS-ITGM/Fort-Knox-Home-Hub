@@ -373,12 +373,13 @@ function AllowlistTab({ rules, busy, act }: { rules: AllowRule[]; busy: boolean;
 }
 
 // ---------------------------------------------------------------- HA Bridge
-interface HASettings { ha_url: string; ha_mock: boolean; token_set: boolean; mode: string }
+interface HASettings { ha_url: string; ha_mock: boolean; token_set: boolean; alarm_code_set: boolean; mode: string }
 function HABridgeTab({ busy, act }: { busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
   const [cfg, setCfg] = useState<HASettings | null>(null);
   const [url, setUrl] = useState("");
   const [mock, setMock] = useState(true);
   const [token, setToken] = useState("");
+  const [alarmCode, setAlarmCode] = useState("");
 
   const load = useCallback(async () => {
     const res = await api("/api/admin/settings/ha");
@@ -392,8 +393,18 @@ function HABridgeTab({ busy, act }: { busy: boolean; act: (f: () => Promise<Resp
   const save = () =>
     act(() => api("/api/admin/settings/ha", {
       method: "PUT",
-      body: JSON.stringify({ ha_url: url, ha_mock: mock, ...(token ? { ha_token: token } : {}) }),
-    })).then((ok) => { if (ok) { setToken(""); load(); } });
+      body: JSON.stringify({
+        ha_url: url, ha_mock: mock,
+        ...(token ? { ha_token: token } : {}),
+        ...(alarmCode ? { ha_alarm_code: alarmCode } : {}),
+      }),
+    })).then((ok) => { if (ok) { setToken(""); setAlarmCode(""); load(); } });
+
+  const clearAlarmCode = () =>
+    act(() => api("/api/admin/settings/ha", {
+      method: "PUT",
+      body: JSON.stringify({ ha_alarm_code: "" }),
+    })).then((ok) => { if (ok) { setAlarmCode(""); load(); } });
 
   const restart = () =>
     act(() => api("/api/admin/bridge/restart", { method: "POST" })).then(() => load());
@@ -420,6 +431,18 @@ function HABridgeTab({ busy, act }: { busy: boolean; act: (f: () => Promise<Resp
           </span>
           <input className={input} type="password" value={token} onChange={(e) => setToken(e.target.value)}
             placeholder={cfg.token_set ? "••••••••  (write-only, never displayed)" : "paste HA long-lived token"} />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-ink-muted">
+            Alarm panel code {cfg.alarm_code_set && <span className="text-ok">(set — enter a value only to replace it)</span>}
+          </span>
+          <input className={input} type="password" inputMode="numeric" value={alarmCode} onChange={(e) => setAlarmCode(e.target.value)}
+            placeholder={cfg.alarm_code_set ? "••••  (write-only, never displayed)" : "the code: from your HA alarm panel"} />
+          <span className="text-[11px] leading-relaxed text-ink-muted">
+            Must match <code>code:</code> on the HA manual alarm panel. Stored encrypted; sent to HA server-side only after a
+            family member&apos;s own PIN is verified, so PINs stay the only way to arm or disarm.
+            {cfg.alarm_code_set && <> <button type="button" className="underline" disabled={busy} onClick={clearAlarmCode}>Clear</button></>}
+          </span>
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={mock} onChange={(e) => setMock(e.target.checked)} className="accent-[#e8a33d]" />

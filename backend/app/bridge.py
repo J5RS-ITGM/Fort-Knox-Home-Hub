@@ -18,7 +18,11 @@ from .ha.mock import MockHA
 
 log = logging.getLogger("homehub.bridge")
 
-_KEYS = ("ha_mock", "ha_url", "ha_token")
+_KEYS = ("ha_mock", "ha_url", "ha_token", "ha_alarm_code")
+# HA manual alarm panel `code:`. Stored encrypted at rest (same Fernet vault as
+# the Gemini key / Google token), write-only via the admin HA settings API,
+# and only ever read server-side at arm/disarm time.
+K_ALARM_CODE = "ha_alarm_code"
 
 
 async def get_setting(db: AsyncSession, key: str) -> str | None:
@@ -35,6 +39,19 @@ async def put_setting(db: AsyncSession, key: str, value: str) -> None:
     await db.commit()
 
 
+async def get_alarm_code(db: AsyncSession) -> str:
+    """Decrypted HA alarm code, or "" if not set."""
+    from .google_cal import _dec  # lazy: avoid import cycle
+    raw = await get_setting(db, K_ALARM_CODE)
+    return (_dec(raw) or "") if raw else ""
+
+
+async def put_alarm_code(db: AsyncSession, code: str) -> None:
+    """Store the alarm code encrypted; empty string clears it."""
+    from .google_cal import _enc  # lazy: avoid import cycle
+    await put_setting(db, K_ALARM_CODE, _enc(code.strip()) if code.strip() else "")
+
+
 async def effective_ha_config(db: AsyncSession) -> dict:
     env = get_settings()
     rows = {
@@ -48,6 +65,7 @@ async def effective_ha_config(db: AsyncSession) -> dict:
         "url": rows.get("ha_url") or env.ha_url,
         "token": token,
         "token_set": bool(token),
+        "alarm_code_set": bool(rows.get("ha_alarm_code")),
     }
 
 
