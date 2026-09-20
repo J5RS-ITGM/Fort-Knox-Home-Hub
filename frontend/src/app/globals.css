@@ -92,16 +92,25 @@ html {
    scrolls inside its own container. Vertical scrolling must always work,
    including in the installed PWA (standalone display mode), where the
    default scroll container behaves differently than in the browser. */
-html {
-  overflow-x: hidden;
-  overscroll-behavior-x: none;
-}
-body {
+/* APP SHELL: the document itself never scrolls. All page content lives in
+   #hh-shell, an explicit scroll container. The fixed bars (MobileNav,
+   kiosk BottomTabs, overlays) sit OUTSIDE it, so there is no scrolling
+   ancestor for them to ride along with — this is what finally pins the
+   bottom bar on iPadOS/Android PWAs, where `position: fixed` inside a
+   scrolling body is unreliable. */
+html, body {
+  height: 100%;
   max-width: 100%;
-  min-height: 100dvh;
-  /* `clip` hides sideways overflow WITHOUT turning body into a scroll
-     container (which is what unpinned the fixed bottom bar on tablets). */
-  overflow-x: clip;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.hh-shell {
+  position: relative;
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 /* Nothing may widen the page: media scales down, wide content (tables,
    code) scrolls inside its own box, never the viewport. */

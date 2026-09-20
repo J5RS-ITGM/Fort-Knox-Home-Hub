@@ -40,7 +40,9 @@ export default function RootLayout({
             navigation instead of unmounting/remounting with each screen.
             Below the tb breakpoint MobileNav's bar is used instead. */}
         <div className="hidden tb:block"><BottomTabs /></div>
-        <div className="mobile-nav-pad">{children}</div>
+        <div id="hh-shell" className="hh-shell">
+          <div className="mobile-nav-pad">{children}</div>
+        </div>
         <KioskKeyboard />
       </body>
     </html>

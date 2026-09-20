@@ -14,6 +14,7 @@ import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
 import AlarmOverlay from "@/components/AlarmOverlay";
 import { usePinGate } from "@/lib/pinGate";
+import { getDeviceId } from "@/lib/deviceId";
 import AppHeader from "@/components/AppHeader";
 import Slideshow from "@/components/Slideshow";
 import { isKiosk, useMe } from "@/lib/auth";
@@ -617,6 +618,10 @@ const TILE_META = {
 };
 const LS_KEY = "homehub.wallpanel.layout.v2";
 const PANEL_KEY = "wallpanel";
+// Per-screen key: hiding the clock on your phone must not hide it on the
+// kiosk or the tablet. Falls back to the login-wide layout (then the
+// household legacy one) when this screen has never saved its own.
+const deviceKey = () => `${PANEL_KEY}~${getDeviceId()}`;
 
 // ================= TILE SHELL =====================
 function Tile({ title, children, edit, onToggleVisible, style, fit }) {
@@ -984,23 +989,27 @@ export default function WallPanel() {
   });
   const layoutLoaded = useRef(false);
   useEffect(() => {
-    fetch(`${API_URL}/api/layouts/${PANEL_KEY}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d?.layout_json) {
-          const parsed = JSON.parse(d.layout_json);
-          if (parsed && parsed.board) setLayout(withNewTiles(parsed));
-        }
-      })
-      .catch(() => {})
-      .finally(() => { layoutLoaded.current = true; });
+    const load = async () => {
+      const get = async (key) => {
+        const r = await fetch(`${API_URL}/api/layouts/${encodeURIComponent(key)}`, { credentials: "include" });
+        return r.ok ? r.json() : null;
+      };
+      let d = null;
+      try { d = await get(deviceKey()); } catch {}
+      if (!d) { try { d = await get(PANEL_KEY); } catch {} }
+      if (d?.layout_json) {
+        const parsed = JSON.parse(d.layout_json);
+        if (parsed && parsed.board) setLayout(withNewTiles(parsed));
+      }
+    };
+    load().finally(() => { layoutLoaded.current = true; });
   }, []);
   useEffect(() => {
     try { localStorage.setItem(LS_KEY, JSON.stringify(layout)); } catch {}
     if (!layoutLoaded.current) return;
     const t = setTimeout(() => {
-      fetch(`${API_URL}/api/layouts/${PANEL_KEY}`, {
-        method: "PUT",
+      fetch(`${API_URL}/api/layouts/${encodeURIComponent(deviceKey())}`, {
+        method: "PUT", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ layout_json: JSON.stringify(layout) }),
       }).catch(() => {});
@@ -1096,11 +1105,11 @@ export default function WallPanel() {
     // a fixed dashboard. On mobile the panel is a normal scrolling page —
     // locking the body there is exactly what broke vertical scrolling.
     if (window.innerWidth < 900) return;
-    const html = document.documentElement;
-    const prev = { o:document.body.style.overflow, ob:document.body.style.overscrollBehavior, m:document.body.style.margin, ho:html.style.overflow };
-    document.body.style.overflow="hidden"; document.body.style.overscrollBehavior="none"; document.body.style.margin="0";
-    html.style.overflow="hidden";
-    return ()=>{ document.body.style.overflow=prev.o; document.body.style.overscrollBehavior=prev.ob; document.body.style.margin=prev.m; html.style.overflow=prev.ho; };
+    const shell = document.getElementById("hh-shell");
+    const prev = { so: shell ? shell.style.overflowY : "", m: document.body.style.margin };
+    if (shell) shell.style.overflowY = "hidden";
+    document.body.style.margin = "0";
+    return ()=>{ if (shell) shell.style.overflowY = prev.so; document.body.style.margin = prev.m; };
   },[]);
 
   const summary = useMemo(()=>{

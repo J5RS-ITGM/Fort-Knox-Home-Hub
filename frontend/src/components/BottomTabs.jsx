@@ -46,7 +46,7 @@ export default function BottomTabs() {
         display: "flex", alignItems: "stretch", justifyContent: "space-around",
         height: `calc(${BOTTOM_TABS_HEIGHT}px + env(safe-area-inset-bottom))`,
         paddingBottom: "env(safe-area-inset-bottom)",
-        background: "rgba(14,17,24,0.92)", backdropFilter: "blur(10px)",
+        background: "#0e1118", transform: "translateZ(0)", willChange: "transform",
         borderTop: "1px solid #262c3b",
       }}
     >

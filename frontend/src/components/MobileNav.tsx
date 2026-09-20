@@ -96,7 +96,7 @@ export default function MobileNav() {
       <nav
         aria-label="Primary"
         style={{
-          position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 40,
+          position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 40, transform: "translateZ(0)", willChange: "transform",
           height: `calc(${MOBILE_BOTTOM_H}px + env(safe-area-inset-bottom))`,
           paddingBottom: "env(safe-area-inset-bottom)",
           display: "flex", alignItems: "stretch",
