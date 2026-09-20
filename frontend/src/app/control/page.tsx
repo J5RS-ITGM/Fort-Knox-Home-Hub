@@ -5,7 +5,7 @@
  *  service proxy. Grouped by type; dimmable lights get a brightness slider. */
 
 import { usePinGate } from "@/lib/pinGate";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { callService, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
@@ -74,11 +74,24 @@ export default function ControlPage() {
   // Explicit lock/unlock (never toggle): lock.toggle isn't allowlisted, and a
   // deadbolt action should always be unambiguous about direction.
   const { run: runPin, pad: lockPinPad } = usePinGate();
+  const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (text: string, ok = true) => {
+    setToast({ text, ok });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  };
   const lockAction = async (e: Entity, service: "lock" | "unlock") => {
     const name = String(e.attributes?.friendly_name ?? e.entity_id);
     mark(e.entity_id, true);
-    try { await runPin(`PIN to ${service} · ${name}`, (pin) => callService("lock", service, e.entity_id, pin ? { pin } : {})); }
-    finally { setTimeout(() => mark(e.entity_id, false), 400); }
+    let ok = false;
+    try { ok = await runPin(`PIN to ${service} · ${name}`, (pin) => callService("lock", service, e.entity_id, pin ? { pin } : {})); }
+    finally {
+      // Accepted: brief pulse then let HA's state carry the story. Cancelled
+      // or rejected: drop the pulse right away, nothing is happening.
+      if (ok) { showToast(`${service === "unlock" ? "Unlocking" : "Locking"} ${name}…`); setTimeout(() => mark(e.entity_id, false), 400); }
+      else mark(e.entity_id, false);
+    }
   };
 
   const dimmable = (e: Entity) => e.domain === "light" &&
@@ -169,6 +182,12 @@ export default function ControlPage() {
   return (
     <PageShell title="Control" active="/control">
       {lockPinPad}
+      {toast && (
+        <div role="status" aria-live="polite" className="pointer-events-none fixed left-1/2 z-[70] -translate-x-1/2 rounded-xl border border-line bg-panel px-4 py-2.5 text-sm font-semibold shadow-lg"
+             style={{ bottom: "calc(62px + env(safe-area-inset-bottom) + 14px)", borderLeft: `4px solid ${toast.ok ? "var(--color-lamp)" : "var(--color-alert)"}`, maxWidth: "calc(100vw - 24px)", overflowWrap: "anywhere" }}>
+          {toast.text}
+        </div>
+      )}
       {!linkUp && (
         <p className="mb-6 rounded-md border border-alert/40 bg-panel p-3 text-sm text-ink-muted">
           Reconnecting to the HomeHub backend…

@@ -913,6 +913,10 @@ export default function WallPanel() {
 
   const [showRadar, setShowRadar] = useState(false);
   const [edit, setEdit] = useState(false);
+  // Free-form drag/resize editing is reserved for the WALL PANEL in kiosk
+  // mode. A regular desktop browser (or a phone/tablet) never gets it.
+  const canGridEdit = kiosk;
+  useEffect(() => { if (!canGridEdit && edit) setEdit(false); }, [canGridEdit, edit]);
   // Bumped by the alarm overlay's Disarm button; AlarmControl watches it and
   // opens the PIN pad (or disarms) exactly as its own Disarm press would.
   const [disarmSignal, setDisarmSignal] = useState(0);
@@ -1120,11 +1124,29 @@ export default function WallPanel() {
   // Explicit lock/unlock (never toggle): lock.toggle isn't allowlisted, and
   // deadbolts shouldn't get ambiguous toggles. In-motion states are ignored.
   const { run: runPin, pad: lockPinPad } = usePinGate();
+  // Small bottom toast for lock feedback ("Unlocking Front Door…").
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const showToast = (text, tone = C.accent) => {
+    setToast({ text, tone });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  };
+  const clearPending = (id) => setPendingActs((p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
   const lockAction = async (l) => {
     if (l.state === "locking" || l.state === "unlocking") return;
     const svc = l.state === "locked" ? "unlock" : "lock";
     const name = l.attributes?.friendly_name || l.entity_id;
-    await runPin(`PIN to ${svc} · ${name}`, (pin) => callService("lock", svc, l.entity_id, pin ? { pin } : {}));
+    const ok = await runPin(`PIN to ${svc} · ${name}`, (pin) => callService("lock", svc, l.entity_id, pin ? { pin } : {}));
+    if (ok) {
+      // PIN accepted (or not needed) and HA took the command: say so, and let
+      // the "Working…" pulse run until the lock actually reports its new state.
+      showToast(`${svc === "unlock" ? "Unlocking" : "Locking"} ${name}…`, svc === "unlock" ? C.open : C.accent);
+    } else {
+      // PIN pad cancelled / wrong PIN / call failed: stop the pulse immediately
+      // so the button never sits on "Working…" for something that isn't happening.
+      clearPending(l.entity_id);
+    }
   };
 
   // ---- grid geometry ----
@@ -1682,11 +1704,13 @@ export default function WallPanel() {
           </button>
         )}
         {isMobile ? (<>
-          {/* text size lives in the header on phones (per-device zoom) —
-              it was buried inside Arrange mode where nobody found it */}
-          <button onClick={()=>bumpText(-0.05)} aria-label="Smaller text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>A−</button>
-          {arrange && <span style={{fontSize:11, color:C.sub, minWidth:32, textAlign:"center"}}>{Math.round(textScale*100)}%</span>}
-          <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:800, cursor:"pointer" }}>A+</button>
+          {/* text size (per-device zoom) is only offered while arranging;
+              it disappears the moment you tap Done */}
+          {arrange && (<>
+            <button onClick={()=>bumpText(-0.05)} aria-label="Smaller text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:11, fontWeight:800, cursor:"pointer" }}>A−</button>
+            <span style={{fontSize:11, color:C.sub, minWidth:32, textAlign:"center"}}>{Math.round(textScale*100)}%</span>
+            <button onClick={()=>bumpText(0.05)} aria-label="Larger text" style={{ background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:800, cursor:"pointer" }}>A+</button>
+          </>)}
           <button onClick={()=>{ void openFrame(); }} aria-label="Play gallery slideshow"
             style={{ display:"flex", alignItems:"center", background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:10, padding:"8px 11px", cursor:"pointer" }}>
             <Play size={14}/>
@@ -1706,9 +1730,11 @@ export default function WallPanel() {
               style={{ display:"flex", alignItems:"center", gap:8, background:C.cardHi, color:C.sub, border:`1px solid ${C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
               <Play size={16}/> Photos
             </button>
-            <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
-              <Settings2 size={17}/>{edit?"Done":"Edit"}
-            </button>
+            {canGridEdit && (
+              <button onClick={()=>setEdit(e=>!e)} style={{ display:"flex", alignItems:"center", gap:8, background: edit?C.accent:C.cardHi, color: edit?C.bg0:C.sub, border:`1px solid ${edit?C.accent:C.edge}`, borderRadius:12, padding:"11px 16px", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+                <Settings2 size={17}/>{edit?"Done":"Edit"}
+              </button>
+            )}
             <AlarmControl variant="compact" disarmSignal={disarmSignal} />
           </div>
         )}
@@ -1726,6 +1752,22 @@ export default function WallPanel() {
           ))}
           <button onClick={resetLayout} style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6, background:C.card, border:`1px solid ${C.edge}`, borderRadius:9, padding:"6px 11px", fontSize:12, color:C.sub, cursor:"pointer" }}>
             <RotateCcw size={13}/>Reset layout
+          </button>
+        </div>
+      )}
+
+      {/* arrange toolbar (phone/tablet): reorder + hide only, no resizing */}
+      {isMobile && arrange && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, background:C.cardHi, border:`1px solid ${C.edge}`, borderRadius:12, padding:"10px 12px", marginBottom:12, flexWrap:"wrap", flexShrink:0 }}>
+          <span style={{fontSize:12, color:C.sub, fontWeight:600}}>↑↓ to reorder · eye to hide</span>
+          {hiddenTiles.length > 0 && <span style={{fontSize:12, color:C.sub}}>Hidden:</span>}
+          {hiddenTiles.map(id => (
+            <button key={id} onClick={()=>setVisible(id,true)} style={{ display:"flex", alignItems:"center", gap:6, background:C.card, border:`1px solid ${C.edge}`, borderRadius:9, padding:"6px 11px", fontSize:12, color:C.text, cursor:"pointer" }}>
+              <Eye size={13}/>{TILE_META[id].label}
+            </button>
+          ))}
+          <button onClick={resetLayout} style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6, background:C.card, border:`1px solid ${C.edge}`, borderRadius:9, padding:"6px 11px", fontSize:12, color:C.sub, cursor:"pointer" }}>
+            <RotateCcw size={13}/>Reset
           </button>
         </div>
       )}
@@ -1748,6 +1790,8 @@ export default function WallPanel() {
                       style={{ width:46, height:46, borderRadius:12, border:`1px solid ${C.edge}`, background:C.card, color: idx===0?C.subDim:C.text, fontSize:20, fontWeight:800, cursor: idx===0?"default":"pointer" }}>↑</button>
                     <button onClick={()=>moveMobile(id,1)} disabled={idx===arr.length-1} aria-label="Move down"
                       style={{ width:46, height:46, borderRadius:12, border:`1px solid ${C.edge}`, background:C.card, color: idx===arr.length-1?C.subDim:C.text, fontSize:20, fontWeight:800, cursor: idx===arr.length-1?"default":"pointer" }}>↓</button>
+                    <button onClick={()=>setVisible(id,false)} aria-label="Hide tile"
+                      style={{ width:46, height:46, borderRadius:12, border:`1px solid ${C.edge}`, background:C.card, color:C.text, display:"grid", placeItems:"center", cursor:"pointer" }}><EyeOff size={20}/></button>
                   </div>
                 )}
               </div>
@@ -1873,6 +1917,13 @@ export default function WallPanel() {
       {framePhotos !== null && <Slideshow photos={framePhotos} onClose={()=>setFramePhotos(null)} />}
       <AlarmOverlay alarm={alarm} entities={entities} onDisarm={()=>setDisarmSignal((n)=>n+1)} />
       {lockPinPad}
+      {toast && (
+        <div role="status" aria-live="polite" style={{ position:"fixed", left:"50%", transform:"translateX(-50%)",
+          bottom:`calc(${isMobile ? 62 : (kiosk ? BOTTOM_TABS_HEIGHT : 0)}px + env(safe-area-inset-bottom) + 14px)`, zIndex:70,
+          background:C.card, color:C.text, border:`1px solid ${toast.tone}`, borderLeft:`4px solid ${toast.tone}`,
+          borderRadius:12, padding:"10px 16px", fontSize:14, fontWeight:700, boxShadow:"0 10px 30px rgba(0,0,0,.45)",
+          maxWidth:"calc(100vw - 24px)", overflowWrap:"anywhere" }}>{toast.text}</div>
+      )}
       <BottomTabs/>
       <style>{`@keyframes fkbusy{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(107,138,253,0.35)}50%{opacity:.65;box-shadow:0 0 0 6px rgba(107,138,253,0)}}`}</style>
     </div>
