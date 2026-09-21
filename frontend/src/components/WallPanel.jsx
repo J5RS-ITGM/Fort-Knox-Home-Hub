@@ -12,7 +12,6 @@ import { buildPlanFloor, makeTextSprite, defaultLabels, fetchPlan, fetchBoardSta
 import { BOTTOM_TABS_HEIGHT } from "@/components/BottomTabs";
 import { webglSurfaces } from "@/lib/theme";
 import AlarmControl from "@/components/AlarmControl";
-import AlarmOverlay from "@/components/AlarmOverlay";
 import { usePinGate } from "@/lib/pinGate";
 import { getDeviceId } from "@/lib/deviceId";
 import AppHeader from "@/components/AppHeader";
@@ -1933,7 +1932,6 @@ export default function WallPanel() {
         </div>
       )}
       {framePhotos !== null && <Slideshow photos={framePhotos} onClose={()=>setFramePhotos(null)} />}
-      <AlarmOverlay alarm={alarm} entities={entities} onDisarm={()=>setDisarmSignal((n)=>n+1)} />
       {lockPinPad}
       {toast && (
         <div role="status" aria-live="polite" style={{ position:"fixed", left:"50%", transform:"translateX(-50%)",

@@ -13,6 +13,8 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { api, Entity } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
+import AlarmOverlay from "@/components/AlarmOverlay";
+import LeakOverlay from "@/components/LeakOverlay";
 
 // Defaults; overridden by Admin -> Settings (alerts_mode, colors, timer).
 const AMBER = "#e8a33d";
@@ -131,8 +133,17 @@ export default function SensorFlash() {
     if (!latest.armed && c.dismissMs > 0) amberTimer.current = setTimeout(() => setEvent(null), c.dismissMs);
   }, [entities]);
 
-  if (!event) return null;
   if (pathname === "/login" || pathname === "/setup") return null;
+
+  // Global full-screen alerts (every page, every device): the alarm's
+  // arming / entry-delay / triggered card, and the water-leak popup.
+  const overlays = (
+    <>
+      <AlarmOverlay alarm={entities.get("alarm_control_panel.homehub")} entities={entities} />
+      <LeakOverlay entities={entities} />
+    </>
+  );
+  if (!event) return overlays;
 
   const color = event.armed ? cfg.colorArmed : cfg.colorDisarmed;
   const dismiss = () => {
@@ -140,7 +151,8 @@ export default function SensorFlash() {
     setEvent(null);
   };
 
-  return (
+  return (<>
+    {overlays}
     <div
       aria-live="assertive"
       style={{
@@ -178,5 +190,5 @@ export default function SensorFlash() {
         {event.armed ? "Acknowledge" : "Dismiss"}
       </button>
     </div>
-  );
+  </>);
 }

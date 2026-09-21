@@ -22,7 +22,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Moon, DoorOpen, TriangleAlert } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, callService } from "@/lib/api";
+import { usePinGate } from "@/lib/pinGate";
+
+const ALARM_ENTITY = "alarm_control_panel.homehub";
 
 const PERIMETER_CLASSES = new Set(["door", "window", "garage_door", "opening"]);
 
@@ -104,6 +107,20 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
 }) {
   const state = alarm?.state ?? "disarmed";
   const active = state === "arming" || state === "pending" || state === "triggered";
+
+  // Disarm is handled HERE (PIN pad + service call) rather than by signalling
+  // some other component: the overlay is global, and on phones/tablets/other
+  // pages there is no alarm tile mounted to receive a signal.
+  const { run: runPin, pad: disarmPad } = usePinGate();
+  const [disarming, setDisarming] = useState(false);
+  const disarm = async () => {
+    if (disarming) return;
+    setDisarming(true);
+    try {
+      await runPin("PIN to disarm", (pin) => callService("alarm_control_panel", "alarm_disarm", ALARM_ENTITY, pin ? { pin } : {}).then(() => undefined));
+      onDisarm?.();
+    } finally { setDisarming(false); }
+  };
 
   // Per-mode delay table from Admin settings (falls back to defaults).
   const [delays, setDelays] = useState<Delays>(DEFAULT_DELAYS);
@@ -206,12 +223,13 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
           </>
         )}
 
-        {onDisarm && (
-          <button onClick={onDisarm}
+        {disarmPad}
+        {(
+          <button onClick={() => void disarm()} disabled={disarming}
             style={{ marginTop: "clamp(14px, 3vmin, 28px)", padding: "clamp(12px,2.6vmin,18px) clamp(28px,8vmin,64px)",
                      fontSize: "clamp(16px, 3vmin, 22px)", fontWeight: 800, borderRadius: 14, border: "none",
                      cursor: "pointer", background: P.btn, color: P.btnInk, touchAction: "manipulation" }}>
-            {state === "arming" ? "Cancel" : "Disarm"}
+            {disarming ? "…" : state === "arming" ? "Cancel" : "Disarm"}
           </button>
         )}
       </div>
