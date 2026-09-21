@@ -143,6 +143,7 @@ export default function MobileNav() {
               {!kiosk && <button onClick={() => { setMore(false); setGate(true); }} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Enter kiosk mode</button>}
               {!kiosk && <button onClick={() => logout()} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Sign out</button>}
               {!kiosk && <button onClick={() => logoutAll()} style={{ textAlign: "left", padding: "12px 8px", borderRadius: 10, background: "none", border: "none", color: "var(--color-ink-muted)", fontSize: 14 }}>Sign out everywhere</button>}
+              <span style={{ padding: "8px 8px 0", fontSize: 11, color: "var(--color-ink-muted)", opacity: .7 }}>Build {process.env.NEXT_PUBLIC_BUILD ?? "dev"}</span>
             </div>
           </div>
         </div>

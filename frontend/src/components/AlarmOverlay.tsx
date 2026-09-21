@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Moon, DoorOpen, TriangleAlert } from "lucide-react";
 import { api, callService } from "@/lib/api";
 import { usePinGate } from "@/lib/pinGate";
+import { useMe } from "@/lib/auth";
 
 const ALARM_ENTITY = "alarm_control_panel.homehub";
 
@@ -111,14 +112,24 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
   // Disarm is handled HERE (PIN pad + service call) rather than by signalling
   // some other component: the overlay is global, and on phones/tablets/other
   // pages there is no alarm tile mounted to receive a signal.
+  const { me } = useMe();
   const { run: runPin, pad: disarmPad } = usePinGate();
   const [disarming, setDisarming] = useState(false);
+  const [disarmErr, setDisarmErr] = useState("");
   const disarm = async () => {
     if (disarming) return;
-    setDisarming(true);
+    setDisarming(true); setDisarmErr("");
     try {
-      await runPin("PIN to disarm", (pin) => callService("alarm_control_panel", "alarm_disarm", ALARM_ENTITY, pin ? { pin } : {}).then(() => undefined));
-      onDisarm?.();
+      const ok = await runPin(
+        "PIN to disarm",
+        (pin) => callService("alarm_control_panel", "alarm_disarm", ALARM_ENTITY, pin ? { pin } : {}).then(() => undefined),
+        { requirePin: Boolean(me?.pin_set) },
+      );
+      if (ok) onDisarm?.();
+      else if (!me?.pin_set) setDisarmErr("Couldn't reach the alarm — try the Disarm tile");
+    } catch (e) {
+      console.error(e);
+      setDisarmErr("Couldn't reach the alarm — try the Disarm tile");
     } finally { setDisarming(false); }
   };
 
@@ -232,6 +243,7 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
             {disarming ? "…" : state === "arming" ? "Cancel" : "Disarm"}
           </button>
         )}
+        {disarmErr && <div style={{ marginTop: 8, fontSize: "clamp(12px, 2.6vmin, 16px)", fontWeight: 700, color: P.ink }}>{disarmErr}</div>}
       </div>
 
       <style>{`@keyframes hh-alarmglow{0%,100%{box-shadow:0 0 0 0 var(--hh-glow),0 18px 60px rgba(0,0,0,.55)}50%{box-shadow:0 0 0 14px transparent,0 18px 60px rgba(0,0,0,.55);border-color:#fff}}`}</style>

@@ -21,8 +21,15 @@ export function usePinGate(tone: string = PIN_C.alert) {
   const [busy, setBusy] = useState(false);
   const jobRef = useRef<Job | null>(null);
 
-  const run = useCallback((title: string, fn: (pin?: string) => Promise<void>): Promise<boolean> => {
+  const run = useCallback((title: string, fn: (pin?: string) => Promise<void>, opts?: { requirePin?: boolean }): Promise<boolean> => {
     return new Promise<boolean>((resolve) => {
+      if (opts?.requirePin) {
+        // Caller already knows a PIN is required (me.pin_set): open the pad
+        // right away instead of a blind first call that would 403 anyway.
+        const j: Job = { title, tone, fn, resolve };
+        jobRef.current = j; setJob(j); setError("");
+        return;
+      }
       fn().then(() => resolve(true)).catch((e) => {
         if (e instanceof ServiceError && (e.detail === "pin_required" || e.detail === "pin_invalid")) {
           const j: Job = { title, tone, fn, resolve };

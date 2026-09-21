@@ -149,9 +149,8 @@ export default function SensorFlash() {
   // overlay's Disarm button and swallowed the taps.
   const alarmState = String(entities.get("alarm_control_panel.homehub")?.state ?? "");
   const alarmLive = alarmState === "arming" || alarmState === "pending" || alarmState === "triggered";
-  if (!event || alarmLive) return overlays;
-
-  const color = event.armed ? cfg.colorArmed : cfg.colorDisarmed;
+  const showCard = Boolean(event) && !alarmLive;
+  const color = event?.armed ? cfg.colorArmed : cfg.colorDisarmed;
   const dismiss = () => {
     if (amberTimer.current) { clearTimeout(amberTimer.current); amberTimer.current = null; }
     setEvent(null);
@@ -159,6 +158,7 @@ export default function SensorFlash() {
 
   return (<>
     {overlays}
+    {showCard && event && (
     <div
       aria-live="assertive"
       style={{
@@ -196,5 +196,6 @@ export default function SensorFlash() {
         {event.armed ? "Acknowledge" : "Dismiss"}
       </button>
     </div>
+    )}
   </>);
 }
