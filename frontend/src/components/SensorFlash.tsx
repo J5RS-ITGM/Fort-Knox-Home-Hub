@@ -143,7 +143,13 @@ export default function SensorFlash() {
       <LeakOverlay entities={entities} />
     </>
   );
-  if (!event) return overlays;
+  // While the alarm itself is live (arming / entry delay / triggered) the
+  // full-screen AlarmOverlay already names the door and carries the Disarm
+  // button. Don't also draw the corner card: on a phone it sat ON TOP of the
+  // overlay's Disarm button and swallowed the taps.
+  const alarmState = String(entities.get("alarm_control_panel.homehub")?.state ?? "");
+  const alarmLive = alarmState === "arming" || alarmState === "pending" || alarmState === "triggered";
+  if (!event || alarmLive) return overlays;
 
   const color = event.armed ? cfg.colorArmed : cfg.colorDisarmed;
   const dismiss = () => {
@@ -159,7 +165,7 @@ export default function SensorFlash() {
         position: "fixed",
         right: "max(16px, env(safe-area-inset-right))",
         bottom: "max(16px, env(safe-area-inset-bottom))",
-        zIndex: 9999,
+        zIndex: 44, // below AlarmOverlay (45), LeakOverlay (46) and the PIN pad (80)
         width: "min(360px, calc(100vw - 32px))",
         borderRadius: 16,
         background: color,
