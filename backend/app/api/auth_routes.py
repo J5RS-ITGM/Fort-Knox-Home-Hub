@@ -430,6 +430,13 @@ SETTING_KEYS = {
     "alarm_exit_away", "alarm_entry_away",
     "alarm_exit_home", "alarm_entry_home",
     "alarm_exit_night", "alarm_entry_night",
+    # screensaver (kiosk wall panels only; household-wide). "1"/"0" flags,
+    # minutes, "photos"|"clock", seconds per photo, quiet hours as HH:MM
+    # (24 h), night clock brightness 10-100. Wake triggers (alarm, leak,
+    # reminders) are NOT settings — they are always on by design.
+    "saver_enabled", "saver_idle_min", "saver_mode", "saver_photo_secs",
+    "saver_show_alarm", "saver_night", "saver_night_start", "saver_night_end",
+    "saver_night_brightness",
 }
 
 

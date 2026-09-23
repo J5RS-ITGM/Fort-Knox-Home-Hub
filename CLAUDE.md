@@ -8,10 +8,13 @@ before changing anything.
 1. **Home Assistant is the source of truth for device state and alarm
    decisions.** This app is a control surface and UX layer. Never implement
    alarm logic, sensor debouncing, or device-state inference here.
-2. **The HA token lives only in the backend environment.** The frontend never
-   talks to HA, never sees the token, and no API key of any kind goes into
-   frontend code. Anthropic API calls (recipe module, future) go through a
-   backend proxy.
+2. **Secrets live in the backend's encrypted `app_settings`, set from the
+   Admin page — never in `.env`, never in the repo.** That covers the HA
+   token, the Gemini key and the Google Calendar tokens (Fernet, see
+   `app/config.py`). The frontend never talks to HA, never sees a token, and
+   no API key of any kind goes into frontend code; AI calls go through a
+   backend proxy. `.env` holds only infrastructure: database URL, cookie
+   settings, the Fernet key itself.
 3. **Service calls are allowlist-only.** `backend/app/api/routes.py:
    ALLOWED_SERVICES` is the single gate. Widening it requires a comment
    explaining why, and never wildcard a domain.
@@ -57,13 +60,26 @@ reference):
 # backend (mock mode, zero services)
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/uvicorn app.main:app --port 8000
-curl localhost:8000/api/health        # expect mock mode, 23 entities
+curl localhost:8000/api/health        # expect mock mode (local dev only)
+# production: compose maps the backend to host port 8100 —
+# curl localhost:8100/api/health → status ok, mode live, ha_connected true
 # frontend
 cd frontend && npm install && npm run build   # must pass clean
 ```
 
 Interactive checks in mock mode: toggle a light via the UI, arm/disarm,
 confirm a disallowed service returns 403.
+
+## Wall panel (kiosk) specifics
+
+- A device becomes a "panel" via the launcher URL `/?panel=1` (see
+  `src/lib/panelDevice.ts`). That flag ONLY enables the on-screen keyboard
+  on the login screen and kiosk-password prompt; it grants nothing.
+- The screensaver (`src/components/Screensaver.tsx`) auto-starts only in
+  kiosk mode, sits UNDER the alarm/leak overlays and PIN pad in z-order,
+  swallows its wake tap, and always wakes for alarm / leak / reminders.
+  Components that must block it call `saverHold(key, on)`; anything that
+  must wake it calls `saverWake()`.
 
 ## Workflow
 

@@ -1,9 +1,23 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { login } from "@/lib/auth";
 import { API_URL } from "@/lib/api";
+import { isBigTouchScreen, markPanelDevice, usePanelDevice } from "@/lib/panelDevice";
+import { closeOsk, openOsk } from "@/components/KioskKeyboard";
+
+/** Keyboard glyph for the on-screen keyboard button (no icon font on the
+ *  login screen, keep it self-contained). */
+function KeyboardIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
+    </svg>
+  );
+}
 
 function LoginForm() {
   const router = useRouter();
@@ -16,6 +30,27 @@ function LoginForm() {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // On-screen keyboard for screens with no physical keyboard. A flagged
+  // wall panel (?panel=1 launcher URL) opens it automatically on focus; any
+  // big touchscreen gets a Keyboard button as a fallback so a brand-new
+  // panel can still log in. Phones never see either (they have their own).
+  const panel = usePanelDevice();
+  const [bigTouch, setBigTouch] = useState(false);
+  const [oskOpen, setOskOpen] = useState(false);
+  const userRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setBigTouch(isBigTouchScreen());
+    const onState = (e: Event) => setOskOpen(!!(e as CustomEvent<boolean>).detail);
+    window.addEventListener("hh-osk-state", onState);
+    return () => window.removeEventListener("hh-osk-state", onState);
+  }, []);
+  const showKeyboardButton = panel || bigTouch;
+  const toggleKeyboard = () => {
+    if (oskOpen) { closeOsk(); return; }
+    markPanelDevice(false);                       // this session only
+    openOsk(userRef.current);
+  };
 
   useEffect(() => {
     fetch(`${API_URL}/api/auth/setup`, { credentials: "include" })
@@ -70,6 +105,7 @@ function LoginForm() {
 
         <div className="flex flex-col gap-3" onKeyDown={onKey}>
           <input
+            ref={userRef}
             className={input}
             placeholder="Username"
             autoComplete="username"
@@ -103,6 +139,17 @@ function LoginForm() {
           >
             {busy ? "…" : needsSetup ? "Create admin account" : "Sign in"}
           </button>
+
+          {showKeyboardButton && (
+            <button
+              type="button"
+              onClick={toggleKeyboard}
+              className="mt-2 flex h-12 items-center justify-center gap-2.5 rounded-md border border-line bg-panel text-sm font-medium text-ink"
+            >
+              <span className="text-lamp"><KeyboardIcon /></span>
+              {oskOpen ? "Hide keyboard" : "Keyboard"}
+            </button>
+          )}
         </div>
       </div>
     </div>

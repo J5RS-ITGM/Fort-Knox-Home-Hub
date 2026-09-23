@@ -29,6 +29,9 @@ import { isKiosk, useMe } from "@/lib/auth";
 const ALARM_ENTITY = "alarm_control_panel.homehub";
 
 const PERIMETER_CLASSES = new Set(["door", "window", "garage_door", "opening"]);
+// Interior motion trips Away mode (HA automation); named as a fallback only
+// when no perimeter contact is open, so a door always wins the headline.
+const MOTION_CLASSES = new Set(["motion", "occupancy", "presence"]);
 
 // HA's manual alarm panel never reports seconds-remaining, so the countdown
 // is computed here: (configured delay for this mode) minus (time since HA
@@ -90,17 +93,19 @@ function trippedSensorName(alarm: any, entities: Map<string, any>): string {
   if (cb && typeof cb === "string" && cb.includes(".")) {
     return prettyName(cb, byId);
   }
-  // fallback: newest open perimeter contact
+  // fallback: newest open perimeter contact, else newest active motion sensor
   let best = null;
+  let motion = null;
   for (const e of entities.values()) {
     if (!e.entity_id.startsWith("binary_sensor.")) continue;
     const cls = e.attributes?.device_class;
-    if (!PERIMETER_CLASSES.has(cls)) continue;
     if (e.state !== "on" && e.state !== "open") continue;
     const t = e.last_changed || e.last_updated || "";
-    if (!best || t > best.t) best = { name: e.attributes?.friendly_name || e.entity_id, t };
+    const name = e.attributes?.friendly_name || e.entity_id;
+    if (PERIMETER_CLASSES.has(cls)) { if (!best || t > best.t) best = { name, t }; }
+    else if (MOTION_CLASSES.has(cls)) { if (!motion || t > motion.t) motion = { name, t }; }
   }
-  return best?.name || "A sensor";
+  return best?.name || motion?.name || "A sensor";
 }
 
 export default function AlarmOverlay({ alarm, entities, onDisarm }: {

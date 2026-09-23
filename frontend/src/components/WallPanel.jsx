@@ -17,6 +17,7 @@ import { getDeviceId } from "@/lib/deviceId";
 import AppHeader from "@/components/AppHeader";
 import Slideshow from "@/components/Slideshow";
 import { isKiosk, useMe } from "@/lib/auth";
+import { saverHold, saverWake } from "@/lib/panelDevice";
 import { useHomeHub } from "@/lib/useHomeHub";
 
 /* ------------------------------------------------------------------ *
@@ -921,6 +922,9 @@ export default function WallPanel() {
   // mode. A regular desktop browser (or a phone/tablet) never gets it.
   const canGridEdit = kiosk;
   useEffect(() => { if (!canGridEdit && edit) setEdit(false); }, [canGridEdit, edit]);
+  // Grid editing holds the screensaver off; a due reminder wakes it.
+  useEffect(() => { saverHold("panel-edit", edit); return () => saverHold("panel-edit", false); }, [edit]);
+  useEffect(() => { if (reminderOpen) saverWake(); }, [reminderOpen]);
   // Bumped by the alarm overlay's Disarm button; AlarmControl watches it and
   // opens the PIN pad (or disarms) exactly as its own Disarm press would.
   const [disarmSignal, setDisarmSignal] = useState(0);

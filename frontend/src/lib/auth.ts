@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, API_URL, User } from "./api";
+import { markPanelDevice } from "./panelDevice";
 
 export async function fetchMe(): Promise<User | null> {
   try {
@@ -66,7 +67,13 @@ export async function toggleKiosk(on: boolean, password: string): Promise<string
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
   });
-  if (res.ok) { window.location.href = on ? "/panel" : "/"; return ""; }
+  if (res.ok) {
+    // A screen that enters kiosk mode is a wall panel: remember that on the
+    // device so the on-screen keyboard is there at the login screen too.
+    if (on) markPanelDevice(true);
+    window.location.href = on ? "/panel" : "/";
+    return "";
+  }
   const body = await res.json().catch(() => null);
   return String(body?.detail ?? `Failed (${res.status})`);
 }

@@ -6,6 +6,7 @@ import ThemeProvider from "@/components/ThemeProvider";
 import MobileNav from "@/components/MobileNav";
 import BottomTabs from "@/components/BottomTabs";
 import KioskKeyboard from "@/components/KioskKeyboard";
+import Screensaver from "@/components/Screensaver";
 import { themeBootScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
@@ -43,6 +44,9 @@ export default function RootLayout({
         <div id="hh-shell" className="hh-shell">
           <div className="mobile-nav-pad">{children}</div>
         </div>
+        {/* Screensaver sits under the alarm/leak overlays and the PIN pad
+            (see its z-order note) and only auto-starts in kiosk mode. */}
+        <Screensaver />
         <KioskKeyboard />
       </body>
     </html>

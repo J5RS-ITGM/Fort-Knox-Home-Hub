@@ -2,7 +2,11 @@
 
 /* KioskKeyboard — on-screen keyboard for the wall panel.
  *
- * Active only when the session is in kiosk mode. Listens for focus on any
+ * Active when the session is in kiosk mode, OR when this device is flagged
+ * as a wall panel (lib/panelDevice — set by the launcher URL ?panel=1 or by
+ * the Keyboard button on the login screen). The device flag is what makes
+ * the keyboard available on the LOGIN screen and the kiosk-password prompt,
+ * where there is no kiosk session yet. Listens for focus on any
  * text-like <input> or <textarea> (opt out with data-no-osk) and slides a
  * dark QWERTY keyboard up from the bottom. Keys write into the focused
  * element through the native value setter + an `input` event so React
@@ -12,6 +16,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMe, isKiosk } from "@/lib/auth";
+import { usePanelDevice, saverHold, adoptPanelParam } from "@/lib/panelDevice";
+
+/** Ask the keyboard to open on an element (login screen Keyboard button).
+ *  Also flips the keyboard active for this session even on an unflagged
+ *  device, so a brand-new panel can log in. */
+export function openOsk(el: HTMLElement | null): void {
+  window.dispatchEvent(new CustomEvent("hh-osk-open", { detail: el }));
+}
+export function closeOsk(): void {
+  window.dispatchEvent(new CustomEvent("hh-osk-open", { detail: null }));
+}
 
 const C = {
   bg: "#161a24", key: "#20242f", keyAlt: "#262b38", edge: "#2a3040",
@@ -45,7 +60,52 @@ export default function KioskKeyboard() {
   const [shift, setShift] = useState(false);
   const [sym, setSym] = useState(false);
   const kbRef = useRef<HTMLDivElement>(null);
-  const active = isKiosk(me);
+  const panel = usePanelDevice();
+  const [forced, setForced] = useState(false);   // login-screen Keyboard button
+  const active = isKiosk(me) || panel || forced;
+
+  // While OUR keyboard is up the field must not also pop the OS keyboard
+  // (Windows touch keyboard on the kiosk PC): inputmode=none tells the
+  // browser to keep it closed. Restored when the field loses the target.
+  const prevInputMode = useRef<string | null>(null);
+  useEffect(() => {
+    if (!target) return;
+    const el = target;
+    prevInputMode.current = el.getAttribute("inputmode");
+    el.setAttribute("inputmode", "none");
+    return () => {
+      // "none" is only ever ours (set on pointerdown above), so drop it too
+      if (prevInputMode.current === null || prevInputMode.current === "none") el.removeAttribute("inputmode");
+      else el.setAttribute("inputmode", prevInputMode.current);
+    };
+  }, [target]);
+
+  // Tell the screensaver not to start mid-typing, and let the login screen
+  // relabel its button ("Keyboard" / "Hide keyboard").
+  useEffect(() => {
+    saverHold("osk", !!target);
+    window.dispatchEvent(new CustomEvent("hh-osk-state", { detail: !!target }));
+    return () => saverHold("osk", false);
+  }, [target]);
+
+  // ?panel=1 on the launcher URL flags this device once, before any login.
+  useEffect(() => { adoptPanelParam(); }, []);
+
+  // Explicit open/close requests (login Keyboard button, KioskGate).
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const el = (e as CustomEvent<HTMLElement | null>).detail;
+      if (!el) { setTarget(null); return; }
+      setForced(true);
+      if (isTexty(el)) {
+        el.setAttribute("inputmode", "none");   // before focus, so the OS keyboard never appears
+        setTarget(el); setSym(false);
+        el.focus();
+      }
+    };
+    window.addEventListener("hh-osk-open", onOpen);
+    return () => window.removeEventListener("hh-osk-open", onOpen);
+  }, []);
 
   useEffect(() => {
     if (!active) return;
@@ -60,7 +120,10 @@ export default function KioskKeyboard() {
     const onDown = (e: PointerEvent) => {
       const el = e.target as Element;
       if (kbRef.current?.contains(el)) return;      // taps on the keyboard keep focus
-      if (isTexty(el)) return;                       // moving between fields keeps it open
+      if (isTexty(el)) {                             // moving between fields keeps it open;
+        el.setAttribute("inputmode", "none");        // pre-empt the OS keyboard on the new field
+        return;
+      }
       setTarget(null);
     };
     document.addEventListener("focusin", onFocus);

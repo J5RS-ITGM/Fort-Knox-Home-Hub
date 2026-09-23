@@ -28,7 +28,12 @@ function shuffle<T>(src: T[]): T[] {
   return a;
 }
 
-export default function Slideshow({ photos, onClose }: { photos: SlidePhoto[]; onClose: () => void }) {
+/** `embedded`: render as an absolute layer inside a parent (the screensaver)
+ *  — no fixed z-index, no click-to-exit, no Esc. `slideMs` overrides the
+ *  hold time per slide (the screensaver takes it from Admin → Settings). */
+export default function Slideshow({ photos, onClose, embedded = false, slideMs = SLIDE_MS }: {
+  photos: SlidePhoto[]; onClose: () => void; embedded?: boolean; slideMs?: number;
+}) {
   const url = (p: SlidePhoto) => `${API_URL}/api/photos/${p.id}/file`;
 
   // working deck (reshuffled when exhausted) + orientation cache
@@ -89,9 +94,9 @@ export default function Slideshow({ photos, onClose }: { photos: SlidePhoto[]; o
   // advance on a timer: promote next -> current, compose a fresh next
   useEffect(() => {
     if (photos.length < 2) return;
-    const t = setInterval(() => setTick((n) => n + 1), SLIDE_MS);
+    const t = setInterval(() => setTick((n) => n + 1), slideMs);
     return () => clearInterval(t);
-  }, [photos.length]);
+  }, [photos.length, slideMs]);
   useEffect(() => {
     if (tick === 0) return;
     let alive = true;
@@ -103,10 +108,11 @@ export default function Slideshow({ photos, onClose }: { photos: SlidePhoto[]; o
 
   // Esc exits
   useEffect(() => {
+    if (embedded) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, embedded]);
 
   // keep the display awake while the frame runs (best-effort)
   useEffect(() => {
@@ -118,7 +124,7 @@ export default function Slideshow({ photos, onClose }: { photos: SlidePhoto[]; o
 
   const Layer = ({ slide, hold }: { slide: Slide; hold: boolean }) => (
     <div className="absolute inset-0 flex items-stretch justify-center"
-         style={hold && photos.length > 1 ? { animation: `hh-slidehold ${SLIDE_MS}ms linear forwards` } : undefined}>
+         style={hold && photos.length > 1 ? { animation: `hh-slidehold ${slideMs}ms linear forwards` } : undefined}>
       {slide.map((p) => (
         // eslint-disable-next-line @next/next/no-img-element
         <img key={p.id} src={url(p)} alt=""
@@ -128,8 +134,10 @@ export default function Slideshow({ photos, onClose }: { photos: SlidePhoto[]; o
     </div>
   );
 
+  const fade = Math.max(300, Math.min(FADE_MS, Math.floor(slideMs / 3)));
   return (
-    <div className="fixed inset-0 z-[90] cursor-pointer bg-black" onClick={onClose} role="button" aria-label="Exit slideshow">
+    <div className={embedded ? "absolute inset-0 bg-black" : "fixed inset-0 z-[90] cursor-pointer bg-black"}
+         onClick={embedded ? undefined : onClose} role={embedded ? undefined : "button"} aria-label={embedded ? undefined : "Exit slideshow"}>
       {photos.length === 0 && (
         <p className="absolute inset-0 grid place-items-center text-sm text-white/60">
           No photos in the gallery yet — add some from the Gallery page, then hit Play.
@@ -138,7 +146,7 @@ export default function Slideshow({ photos, onClose }: { photos: SlidePhoto[]; o
       {/* two stacked layers: the incoming slide sits underneath, the current one fades out over it */}
       {nxt && photos.length > 1 && <Layer slide={nxt} hold={false} />}
       {cur && <Layer key={cur.map((p) => p.id).join("+") + String(tick)} slide={cur} hold />}
-      <style>{`@keyframes hh-slidehold{0%{opacity:1}${Math.round(((SLIDE_MS - FADE_MS) / SLIDE_MS) * 100)}%{opacity:1}100%{opacity:0}}`}</style>
+      <style>{`@keyframes hh-slidehold{0%{opacity:1}${Math.round(((slideMs - fade) / slideMs) * 100)}%{opacity:1}100%{opacity:0}}`}</style>
     </div>
   );
 }

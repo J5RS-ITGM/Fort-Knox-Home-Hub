@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { saverHold } from "@/lib/panelDevice";
 
 export const PIN_C = { ink: "#e8ebf2", sub: "#8a91a0", line: "#2a3140", field: "#0f1116", alert: "#e0483d", ok: "#3fb98f" };
 
@@ -18,6 +19,8 @@ export default function PinPad({
   const [pin, setPin] = useState("");
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+  // Never let the screensaver start over an open PIN pad.
+  useEffect(() => { saverHold("pinpad", true); return () => saverHold("pinpad", false); }, []);
   useEffect(() => { if (error) setPin(""); }, [error]);
 
   const press = (d: string) => setPin((p) => (p.length < 8 ? p + d : p));

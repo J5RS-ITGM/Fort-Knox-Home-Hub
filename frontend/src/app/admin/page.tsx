@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
+import { saverPreview } from "@/lib/panelDevice";
+import { SAVER_DEFAULTS } from "@/components/Screensaver";
 import { api, API_URL, AuditRow, Entity, User } from "@/lib/api";
 import { applyTheme, ThemeName } from "@/lib/theme";
 
@@ -611,6 +613,15 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           <span className="text-[11px] text-ink-muted">{kioskSet ? "Password set" : "Not set yet"}</span>
         </div>
 
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Screensaver</h3>
+        <p className="-mt-1 text-[11px] text-ink-muted">
+          Wall panels in kiosk mode only; phones and tablets never show it. The first tap only wakes the screen.
+        </p>
+        <ScreensaverFields form={form} setForm={setForm} />
+        <p className="text-[11px] text-ink-muted">
+          Always wakes for: arming countdown, entry delay, alarm triggered, water leak, task reminders. Not adjustable, so an alert can never be hidden.
+        </p>
+
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Appearance</h3>
         <div className="flex flex-col gap-2">
           <span className="text-xs text-ink-muted">Theme</span>
@@ -654,18 +665,106 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
             // send ONLY known editable fields — never echo back whatever the
             // GET returned (defense in depth against key leakage)
             const keys = [...fields.map(([key]) => key), "alerts_mode", "alert_color_disarmed", "alert_color_armed", "alert_dismiss_secs", "alert_rules", "theme_mode", "theme_accent", "security_view",
-              "alarm_exit_away", "alarm_entry_away", "alarm_exit_home", "alarm_entry_home", "alarm_exit_night", "alarm_entry_night"];
+              "alarm_exit_away", "alarm_entry_away", "alarm_exit_home", "alarm_entry_home", "alarm_exit_night", "alarm_entry_night",
+              ...SAVER_KEYS];
             const values = Object.fromEntries(keys.map((key) => [key, form[key] ?? ""]));
             act(() => api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ values }) }));
           }}>
           Save settings
         </button>
         <p className="text-[11px] leading-relaxed text-ink-muted">
-          Secrets never live here: the HA token, database credentials, and cookie settings are environment-only
-          (server <span className="font-[family-name:var(--font-mono)]">.env</span>), by design.
+          Secrets are never shown here: the HA token, AI keys and Google tokens are stored encrypted and only ever
+          set, never read back; database credentials and cookie settings stay in the server{" "}
+          <span className="font-[family-name:var(--font-mono)]">.env</span>.
         </p>
       </div>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------- Screensaver
+const SAVER_KEYS = ["saver_enabled", "saver_idle_min", "saver_mode", "saver_photo_secs", "saver_show_alarm",
+  "saver_night", "saver_night_start", "saver_night_end", "saver_night_brightness"];
+
+/** Half-hour clock choices for quiet hours: picked from a list, never typed,
+ *  so it works on the panel without a keyboard. */
+const HALF_HOURS = Array.from({ length: 48 }, (_, i) => {
+  const h = Math.floor(i / 2), m = i % 2 ? "30" : "00";
+  const label = `${h % 12 || 12}:${m} ${h < 12 ? "AM" : "PM"}`;
+  return [`${String(h).padStart(2, "0")}:${m}`, label] as [string, string];
+});
+
+function ScreensaverFields({ form, setForm }: { form: Record<string, string>; setForm: (f: Record<string, string>) => void }) {
+  const d = SAVER_DEFAULTS;
+  const get = (k: string, fb: string) => (form[k] === undefined || form[k] === "" ? fb : form[k]);
+  const set = (k: string, v: string) => setForm({ ...form, [k]: v });
+  const on = (k: string, fb: boolean) => get(k, fb ? "1" : "0") === "1";
+  const Toggle = ({ k, fb, label, hint }: { k: string; fb: boolean; label: string; hint: string }) => (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-line bg-panel px-3 py-2.5">
+      <div><div className="text-sm">{label}</div><div className="text-[11px] text-ink-muted">{hint}</div></div>
+      <button type="button" aria-pressed={on(k, fb)} aria-label={label} onClick={() => set(k, on(k, fb) ? "0" : "1")}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${on(k, fb) ? "bg-lamp" : "bg-line"}`}>
+        <span className={`absolute top-1 h-5 w-5 rounded-full bg-field transition-all ${on(k, fb) ? "left-6" : "left-1"}`} />
+      </button>
+    </div>
+  );
+  const Seg = ({ k, fb, opts, label, hint }: { k: string; fb: string; opts: [string, string][]; label: string; hint: string }) => (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-line bg-panel px-3 py-2.5">
+      <div><div className="text-sm">{label}</div><div className="text-[11px] text-ink-muted">{hint}</div></div>
+      <div className="flex shrink-0 gap-1 rounded-lg border border-line bg-field p-1">
+        {opts.map(([v, l]) => (
+          <button key={v} type="button" onClick={() => set(k, v)}
+            className={`min-w-10 rounded-md px-3 py-1.5 text-sm ${get(k, fb) === v ? "bg-lamp font-semibold text-field" : "text-ink-muted hover:text-ink"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  const nightOn = on("saver_night", d.night);
+  const bright = Number(get("saver_night_brightness", String(d.nightBrightness)));
+  return (
+    <div className="flex flex-col gap-2">
+      <Toggle k="saver_enabled" fb={d.enabled} label="Screensaver" hint="Turn off to keep the panel on its normal screen" />
+      <Seg k="saver_idle_min" fb={String(d.idleMin)} label="Start after" hint="Minutes with no touch"
+           opts={[["1","1"],["2","2"],["5","5"],["10","10"],["15","15"],["30","30"]]} />
+      <Seg k="saver_mode" fb={d.mode} label="Daytime display" hint="Photos come from the Gallery page"
+           opts={[["photos","Photos + clock"],["clock","Clock only"]]} />
+      <Seg k="saver_photo_secs" fb={String(d.photoSecs)} label="Change photo every" hint="Seconds per photo"
+           opts={[["10","10"],["20","20"],["30","30"],["60","60"]]} />
+      <Toggle k="saver_show_alarm" fb={d.showAlarm} label="Show alarm status" hint="Armed or disarmed chip on the screensaver" />
+      <Toggle k="saver_night" fb={d.night} label="Night mode" hint="Dim clock on black during quiet hours, no photos" />
+      {nightOn && (
+        <>
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-line bg-panel px-3 py-2.5">
+            <div><div className="text-sm">Quiet hours</div><div className="text-[11px] text-ink-muted">Pick from the list, no typing needed</div></div>
+            <div className="flex items-center gap-2">
+              <select className={`${input} w-auto`} value={get("saver_night_start", d.nightStart)} onChange={(e) => set("saver_night_start", e.target.value)}>
+                {HALF_HOURS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <span className="text-xs text-ink-muted">to</span>
+              <select className={`${input} w-auto`} value={get("saver_night_end", d.nightEnd)} onChange={(e) => set("saver_night_end", e.target.value)}>
+                {HALF_HOURS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-line bg-panel px-3 py-2.5">
+            <div><div className="text-sm">Night clock brightness</div><div className="text-[11px] text-ink-muted">How bright the clock glows in a dark kitchen</div></div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-ink-muted">Dim</span>
+              <input type="range" min={10} max={100} step={5} value={bright} aria-label="Night clock brightness"
+                     onChange={(e) => set("saver_night_brightness", e.target.value)} className="w-40 accent-[var(--color-lamp)]" />
+              <span className="text-[11px] text-ink-muted">Bright</span>
+              <span className="w-10 text-right text-sm font-semibold">{bright}%</span>
+            </div>
+          </div>
+        </>
+      )}
+      <button type="button" onClick={() => saverPreview(form)}
+        className="self-start rounded-md border border-line px-3 py-1.5 text-xs text-ink-muted hover:text-ink">
+        Preview on this screen
+      </button>
+    </div>
   );
 }
 
