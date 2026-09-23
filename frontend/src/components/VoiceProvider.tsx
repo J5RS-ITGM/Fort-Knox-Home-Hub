@@ -48,7 +48,7 @@ export default function VoiceProvider() {
   }, [enabled, configured]);
 
   // a ringing or live call keeps the screensaver off and wakes it
-  const busy = !!v.incoming || !!v.call;
+  const busy = !!v.incoming || !!v.call || !!v.failure;
   useEffect(() => { saverHold("voice", busy); if (busy) saverWake(); return () => saverHold("voice", false); }, [busy]);
 
   // call timer
@@ -71,6 +71,24 @@ export default function VoiceProvider() {
   const who = (raw: string) => names[raw] ?? (raw === "911" ? "911 Emergency" : pretty(raw));
 
   if (!enabled) return null;
+
+  if (v.failure && !v.call && !v.incoming) {
+    const is911 = v.failure.to === "911";
+    return (
+      <Screen bg={is911 ? "#12090a" : C.bg}>
+        <div style={{ fontSize: "clamp(12px, 2.6vmin, 16px)", letterSpacing: "0.2em", textTransform: "uppercase", color: "#e8b3ad" }}>Call failed</div>
+        <Avatar label={who(v.failure.to)} />
+        <div style={{ fontSize: "clamp(22px, 6vmin, 34px)", fontWeight: 600, marginTop: 14 }}>{who(v.failure.to)}</div>
+        <div style={{ marginTop: 14, maxWidth: 620, fontSize: "clamp(14px, 3.2vmin, 19px)", color: C.ink, lineHeight: 1.45 }}>{v.failure.message}</div>
+        {v.failure.code !== undefined && <div style={{ marginTop: 6, fontSize: 13, color: C.sub }}>Error {v.failure.code}</div>}
+        {is911 && <div style={{ marginTop: 14, fontSize: "clamp(14px, 3vmin, 18px)", fontWeight: 700, color: "#ff8a7f" }}>Use a cell phone to call 911 now.</div>}
+        <button type="button" onClick={() => voice.dismissFailure()}
+          style={{ marginTop: 30, padding: "14px 34px", borderRadius: 12, border: `1px solid ${C.line}`, background: "#1a2330", color: C.ink, fontSize: 17, fontWeight: 600, cursor: "pointer" }}>
+          Dismiss
+        </button>
+      </Screen>
+    );
+  }
 
   if (v.incoming) {
     return (

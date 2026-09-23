@@ -32,14 +32,33 @@ export interface VoiceState {
   callState: "idle" | "dialing" | "ringing" | "active" | "ended";
   muted: boolean;
   startedAt: number | null;
+  failure: { message: string; code?: number; to: string } | null;   // shown until dismissed
 }
 
 const initial: VoiceState = {
   status: "off", error: "", incoming: null, call: null, callTo: "",
-  callState: "idle", muted: false, startedAt: null,
+  callState: "idle", muted: false, startedAt: null, failure: null,
 };
 
 type Listener = (s: VoiceState) => void;
+
+/** Plain-English reasons for the Twilio Voice SDK errors we can hit. */
+function explain(code: number | undefined, fallback: string): string {
+  switch (code) {
+    case 31401: case 31402: case 31208: case 31201:
+      return "No microphone available. Plug in the speakerphone and allow the microphone for this site.";
+    case 31005: case 31009: case 53000: case 53405:
+      return "Couldn't reach the phone service. Check the internet connection.";
+    case 31204: case 31205: case 20101: case 20104:
+      return "The phone line's login expired or is invalid. Check the Twilio settings in Admin → Phone & 911.";
+    case 31000: case 31002: case 31003:
+      return "The call was rejected by the phone service. Check the Twilio TwiML App and webhook URLs.";
+    case 11200: case 11205: case 11210:
+      return "The phone service couldn't reach Fort Knox's call handler (webhook).";
+    default:
+      return fallback || "The call failed.";
+  }
+}
 
 class VoiceClient {
   private device: Device | null = null;
@@ -68,7 +87,12 @@ class VoiceClient {
       const dev = new Device(tok, { closeProtection: true, logLevel: "error" });
       dev.on("registered", () => this.set({ status: "ready" }));
       dev.on("unregistered", () => this.set({ status: "connecting" }));
-      dev.on("error", (e: Error) => this.set({ status: "error", error: e.message }));
+      dev.on("error", (e: { code?: number; message?: string }) => {
+        const msg = explain(e.code, e.message ?? "");
+        this.set({ status: "error", error: msg });
+        // an error while a call is being placed is that call's failure
+        if (this.state.call && this.state.callState !== "active") this.fail(this.state.callTo, msg, e.code);
+      });
       dev.on("tokenWillExpire", async () => { try { dev.updateToken(await this.token()); } catch { /* next expiry retries */ } });
       dev.on("incoming", (call: Call) => {
         // Only one call at a time on a wall panel.
@@ -98,11 +122,32 @@ class VoiceClient {
   async dial(to: string, label?: string): Promise<void> {
     if (!this.device) throw new Error("phone not ready");
     if (this.state.call || this.state.incoming) throw new Error("already on a call");
-    const call = await this.device.connect({ params: { To: to } });
-    this.wire(call, label ?? to);
-    this.set({ call, callTo: label ?? to, callState: "dialing", muted: false });
-    void this.log(to, "dial");
+    const name = label ?? to;
+    this.set({ failure: null });
+    // Fail loudly and early if there is no microphone: otherwise the SDK
+    // tears the call down in a blink and the screen just flashes.
+    if (!(await warmMic())) {
+      this.fail(name, "No microphone available. Plug in the speakerphone and allow the microphone for this site.", 31402);
+      return;
+    }
+    try {
+      const call = await this.device.connect({ params: { To: to } });
+      this.wire(call, name);
+      this.set({ call, callTo: name, callState: "dialing", muted: false });
+      void this.log(to, "dial");
+    } catch (e) {
+      const err = e as { code?: number; message?: string };
+      this.fail(name, explain(err.code, err.message ?? ""), err.code);
+    }
   }
+
+  /** A failed call stays on screen (with the reason) until dismissed. */
+  private fail(to: string, message: string, code?: number) {
+    this.set({ call: null, incoming: null, callState: "idle", muted: false, startedAt: null,
+               failure: { message, code, to } });
+    void this.log(to, "failed", `${code ?? ""} ${message}`.trim().slice(0, 190));
+  }
+  dismissFailure(): void { this.set({ failure: null }); }
 
   answer(): void {
     const c = this.state.incoming;
@@ -119,11 +164,25 @@ class VoiceClient {
   digits(d: string): void { this.state.call?.sendDigits(d); }
 
   private wire(call: Call, label: string) {
-    call.on("accept", () => this.set({ callState: "active", startedAt: Date.now() }));
+    let connected = false;
+    let failed = false;
+    call.on("accept", () => { connected = true; this.set({ callState: "active", startedAt: Date.now() }); });
     call.on("ringing", () => this.set({ callState: "dialing" }));
-    call.on("disconnect", () => { void this.log(label, "ended"); this.endCall(); });
+    call.on("error", (e: { code?: number; message?: string }) => {
+      failed = true;
+      this.fail(label, explain(e.code, e.message ?? ""), e.code);
+    });
+    call.on("disconnect", () => {
+      if (failed) return;
+      if (!connected && this.state.callState !== "active") {
+        // Dropped before anyone answered: Twilio refused or couldn't route it.
+        this.fail(label, "The call ended before it connected. Check Admin → Audit for voice_outbound_* entries, and the Twilio Console call log for an error code.");
+        return;
+      }
+      void this.log(label, "ended");
+      this.endCall();
+    });
     call.on("cancel", () => this.endCall());
-    call.on("error", (e: Error) => { this.set({ error: e.message }); void this.log(label, "failed", e.message.slice(0, 120)); this.endCall(); });
   }
 
   private endCall() { this.set({ call: null, incoming: null, callTo: "", callState: "idle", muted: false, startedAt: null }); }

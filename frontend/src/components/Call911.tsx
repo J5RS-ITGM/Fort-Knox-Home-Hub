@@ -69,6 +69,8 @@ export default function Call911({ onClose }: { onClose: () => void }) {
 
   // once the call is live, the ActiveCall overlay (VoiceProvider) takes over
   useEffect(() => { if (v.call && phase === "calling") onClose(); }, [v.call, phase, onClose]);
+  // a failure is shown by VoiceProvider's "Call failed" screen; get out of its way
+  useEffect(() => { if (v.failure && phase === "calling") onClose(); }, [v.failure, phase, onClose]);
 
   const hint = phase === "calling" ? "Connecting…" : phase === "holding" ? "Keep holding…" : phase === "error" ? "Try again" : "Hold to call";
   const bg = phase === "calling" ? "#b3271d" : phase === "holding" ? "#d13b30" : "#e0483d";
