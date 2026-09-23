@@ -65,7 +65,7 @@ function AdminInner() {
   };
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-6">
+    <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-5 flex items-center gap-3">
         <a href="/" className={btn}>← Dashboard</a>
         <h1 className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-wide">Admin</h1>
@@ -131,6 +131,7 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
                             onChange={(e) => patchSensitive(u.id, { role: e.target.value })}>
                       <option value="member">member</option>
                       <option value="admin">admin</option>
+                      <option value="kiosk">kiosk (wall panel)</option>
                     </select>
                     <button disabled={busy} className={btn} onClick={() => patch(u.id, { disabled: !u.disabled })}>
                       {u.disabled ? "Enable" : "Disable"}
@@ -168,12 +169,25 @@ function UsersTab({ users, busy, act }: { users: User[]; busy: boolean; act: (f:
         <input className={input} placeholder="Display name" value={nu.display_name} onChange={(e) => setNu({ ...nu, display_name: e.target.value })} />
         <input className={input} type="password" placeholder="Password (10+)" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
         <select className={input} value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
-          <option value="member">member</option><option value="admin">admin</option>
+          <option value="member">member</option><option value="admin">admin</option><option value="kiosk">kiosk (wall panel)</option>
         </select>
         <button disabled={busy || !nu.username || !nu.password} className={primary}
           onClick={() => act(() => api("/api/admin/users", { method: "POST", body: JSON.stringify(nu) })).then((ok) => ok && setNu({ username: "", password: "", display_name: "", role: "member" }))}>
           Add user
         </button>
+      </div>
+      <p className="mt-2 text-[11px] text-ink-muted">
+        <b>kiosk (wall panel)</b>: a dedicated login for a panel. Member privileges, and every session is locked in kiosk mode from the moment it signs in
+        (no kiosk password needed, no way to exit into the full app). Arm/disarm/lock still take a family member&apos;s PIN.
+      </p>
+      <div>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
+        Roles: <b>member</b> = family screens, own PIN; <b>admin</b> = everything (Eric and Jessica only); <b>kiosk</b> = a dedicated wall-panel
+        login that is <i>always</i> in kiosk mode (member privileges, no admin, no kiosk password needed to enter or leave it).
+        Sign the kitchen panel in as the kiosk user; arming and doors still take any family member&apos;s PIN.
+      </p>
+      <div className="hidden">
       </div>
     </section>
   );
@@ -456,6 +470,12 @@ function HABridgeTab({ busy, act }: { busy: boolean; act: (f: () => Promise<Resp
 }
 
 // ---------------------------------------------------------------- Settings
+type SettingsSub = "general" | "alerts" | "alarm" | "saver" | "phone" | "kiosk" | "integrations" | "appearance";
+const SETTINGS_TABS: [SettingsSub, string][] = [
+  ["general", "General"], ["alerts", "Alerts"], ["alarm", "Alarm"], ["saver", "Screensaver"],
+  ["phone", "Phone & 911"], ["kiosk", "Kiosk"], ["integrations", "Integrations"], ["appearance", "Appearance"],
+];
+
 function SettingsTab({ settings, entities, busy, act }: { settings: Record<string, string>; entities: Entity[]; busy: boolean; act: (f: () => Promise<Response>) => Promise<boolean> }) {
   // Sensors that can raise an alert card: binary_sensors + locks (matches
   // SensorFlash.activeVerb). Includes Z-Wave diagnostics with no device
@@ -473,6 +493,7 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
     } catch { return {}; }
   };
   const [form, setForm] = useState<Record<string, string>>(settings);
+  const [sub, setSub] = useState<SettingsSub>("general");
   const [kioskPw, setKioskPw] = useState("");
   const [kioskSet, setKioskSet] = useState(false);
   useEffect(() => {
@@ -487,8 +508,17 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
   ];
   return (
     <section>
-      <h2 className={sectionTitle}>App settings</h2>
-      <div className="flex max-w-md flex-col gap-3">
+      <h2 className={sectionTitle}>Settings</h2>
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {SETTINGS_TABS.map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)}
+            className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${sub === id ? "border-lamp/60 bg-lamp/10 text-ink" : "border-line text-ink-muted hover:text-ink"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex max-w-4xl flex-col gap-3">
+        {sub === "general" && (<>
         {fields.map(([key, label, ph]) => (
           <label key={key} className="flex flex-col gap-1">
             <span className="text-xs text-ink-muted">{label}</span>
@@ -496,6 +526,8 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </label>
         ))}
 
+        </>)}
+        {sub === "alerts" && (<>
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Sensor alert cards</h3>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-ink-muted">Show alerts</span>
@@ -523,31 +555,6 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </label>
         </div>
         <p className="text-[11px] text-ink-muted">Armed alerts always stay until acknowledged. Changes reach open panels within a minute.</p>
-
-        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Alarm countdowns</h3>
-        <p className="-mt-1 text-[11px] text-ink-muted">
-          Seconds shown on the panel&apos;s arming / entry-delay overlay. Home Assistant doesn&apos;t report time remaining, so
-          these must match <code>arming_time</code> (exit) and <code>delay_time</code> (entry) per mode in configuration.yaml.
-        </p>
-        <div className="grid max-w-md grid-cols-3 gap-3">
-          {([["away","Away"],["home","Home"],["night","Night"]] as [string,string][]).map(([m, label]) => (
-            <div key={m} className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3">
-              <span className="text-xs font-semibold">{label}</span>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-ink-muted">Exit (arming)</span>
-                <input type="number" min={0} max={600} className={input}
-                  value={form[`alarm_exit_${m}`] ?? ""} placeholder={m === "home" ? "0" : "30"}
-                  onChange={(e) => setForm({ ...form, [`alarm_exit_${m}`]: e.target.value })} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-ink-muted">Entry delay</span>
-                <input type="number" min={0} max={600} className={input}
-                  value={form[`alarm_entry_${m}`] ?? ""} placeholder={m === "night" ? "10" : "30"}
-                  onChange={(e) => setForm({ ...form, [`alarm_entry_${m}`]: e.target.value })} />
-              </label>
-            </div>
-          ))}
-        </div>
 
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Per-sensor alert rules</h3>
         <p className="-mt-1 text-[11px] text-ink-muted">
@@ -592,15 +599,51 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </table>
         </div>
 
-        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">AI providers</h3>
-        <AiProvidersCard />
+        </>)}
+        {sub === "alarm" && (<>
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Alarm countdowns</h3>
+        <p className="-mt-1 text-[11px] text-ink-muted">
+          Seconds shown on the panel&apos;s arming / entry-delay overlay. Home Assistant doesn&apos;t report time remaining, so
+          these must match <code>arming_time</code> (exit) and <code>delay_time</code> (entry) per mode in configuration.yaml.
+        </p>
+        <div className="grid max-w-2xl grid-cols-3 gap-3">
+          {([["away","Away"],["home","Home"],["night","Night"]] as [string,string][]).map(([m, label]) => (
+            <div key={m} className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3">
+              <span className="text-xs font-semibold">{label}</span>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-ink-muted">Exit (arming)</span>
+                <input type="number" min={0} max={600} className={input}
+                  value={form[`alarm_exit_${m}`] ?? ""} placeholder={m === "home" ? "0" : "30"}
+                  onChange={(e) => setForm({ ...form, [`alarm_exit_${m}`]: e.target.value })} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-ink-muted">Entry delay</span>
+                <input type="number" min={0} max={600} className={input}
+                  value={form[`alarm_entry_${m}`] ?? ""} placeholder={m === "night" ? "10" : "30"}
+                  onChange={(e) => setForm({ ...form, [`alarm_entry_${m}`]: e.target.value })} />
+              </label>
+            </div>
+          ))}
+        </div>
 
-        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Google Calendar sync</h3>
-        <GoogleCalendarCard />
+        </>)}
+        {sub === "saver" && (<>
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Screensaver</h3>
+        <p className="-mt-1 text-[11px] text-ink-muted">
+          Wall panels in kiosk mode only; phones and tablets never show it. The first tap only wakes the screen.
+        </p>
+        <ScreensaverFields form={form} setForm={setForm} />
+        <p className="text-[11px] text-ink-muted">
+          Always wakes for: arming countdown, entry delay, alarm triggered, water leak, task reminders. Not adjustable, so an alert can never be hidden.
+        </p>
 
+        </>)}
+        {sub === "phone" && (<>
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Phone &amp; 911</h3>
         <PhoneAdminCard />
 
+        </>)}
+        {sub === "kiosk" && (<>
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Kiosk mode</h3>
         <p className="-mt-1 text-[11px] text-ink-muted">
           Any signed-in screen can enter kiosk mode (family views only, big bottom tabs, no admin or deletes) with this
@@ -617,15 +660,16 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           <span className="text-[11px] text-ink-muted">{kioskSet ? "Password set" : "Not set yet"}</span>
         </div>
 
-        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Screensaver</h3>
-        <p className="-mt-1 text-[11px] text-ink-muted">
-          Wall panels in kiosk mode only; phones and tablets never show it. The first tap only wakes the screen.
-        </p>
-        <ScreensaverFields form={form} setForm={setForm} />
-        <p className="text-[11px] text-ink-muted">
-          Always wakes for: arming countdown, entry delay, alarm triggered, water leak, task reminders. Not adjustable, so an alert can never be hidden.
-        </p>
+        </>)}
+        {sub === "integrations" && (<>
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">AI providers</h3>
+        <AiProvidersCard />
 
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Google Calendar sync</h3>
+        <GoogleCalendarCard />
+
+        </>)}
+        {sub === "appearance" && (<>
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Appearance</h3>
         <div className="flex flex-col gap-2">
           <span className="text-xs text-ink-muted">Theme</span>
@@ -664,6 +708,8 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           </select>
         </label>
 
+        </>)}
+        {["general", "alerts", "alarm", "saver", "appearance"].includes(sub) && (<>
         <button disabled={busy} className={`${primary} mt-1 self-start`}
           onClick={() => {
             // send ONLY known editable fields — never echo back whatever the
@@ -681,6 +727,7 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
           set, never read back; database credentials and cookie settings stay in the server{" "}
           <span className="font-[family-name:var(--font-mono)]">.env</span>.
         </p>
+        </>)}
       </div>
     </section>
   );

@@ -25,6 +25,7 @@ import { Moon, DoorOpen, TriangleAlert } from "lucide-react";
 import { api, callService } from "@/lib/api";
 import Call911 from "@/components/Call911";
 import { useIsPhoneDevice } from "@/components/VoiceProvider";
+import { hasNativeDialer } from "@/lib/panelDevice";
 import { warmMic } from "@/lib/voice";
 import { usePinGate } from "@/lib/pinGate";
 import { isKiosk, useMe } from "@/lib/auth";
@@ -127,6 +128,8 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
   // because the registered E911 address is the house, not the phone.
   const phoneDevice = useIsPhoneDevice();
   const [show911, setShow911] = useState(false);
+  const [dialer, setDialer] = useState(false);
+  useEffect(() => { setDialer(hasNativeDialer()); }, []);
   const [voiceCfg, setVoiceCfg] = useState<{ configured: boolean; auto_show_911: boolean } | null>(null);
   useEffect(() => {
     if (!phoneDevice) return;
@@ -275,7 +278,7 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
               Call 911
             </button>
           )}
-          {red && !phoneDevice && (
+          {red && !phoneDevice && dialer && (
             <a href="tel:911"
               style={{ padding: "clamp(12px,2.6vmin,18px) clamp(22px,6vmin,44px)", display: "inline-block",
                        fontSize: "clamp(16px, 3vmin, 22px)", fontWeight: 800, borderRadius: 14, textDecoration: "none",

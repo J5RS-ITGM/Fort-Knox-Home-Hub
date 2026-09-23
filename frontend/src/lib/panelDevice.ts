@@ -108,3 +108,12 @@ export function saverWake(): void {
 export function saverPreview(values?: Record<string, string>): void {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("hh-saver-preview", { detail: values ?? null }));
 }
+
+
+/** A device with its own phone dialer (phone or tablet: coarse pointer). A
+ *  desktop browser has no tel: handler worth opening — Windows would ask
+ *  "which app?" — so callers should show numbers as text there instead. */
+export function hasNativeDialer(): boolean {
+  if (typeof window === "undefined") return false;
+  try { return window.matchMedia("(any-pointer: coarse)").matches; } catch { return false; }
+}

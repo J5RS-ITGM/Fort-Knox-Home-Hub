@@ -16,6 +16,7 @@ import { Delete, Phone, PhoneCall, ShieldAlert } from "lucide-react";
 import PageShell from "@/components/PageShell";
 import Call911 from "@/components/Call911";
 import { useIsPhoneDevice } from "@/components/VoiceProvider";
+import { hasNativeDialer } from "@/lib/panelDevice";
 import { api } from "@/lib/api";
 import { voice, useVoice } from "@/lib/voice";
 
@@ -40,6 +41,8 @@ function PhoneInner() {
   const [dial, setDial] = useState("");
   const [err, setErr] = useState("");
   const [show911, setShow911] = useState(false);
+  const [dialer, setDialer] = useState(false);   // phone/tablet: tel: links; desktop: text only
+  useEffect(() => { setDialer(hasNativeDialer()); }, []);
 
   useEffect(() => {
     api("/api/voice/numbers").then((r) => (r.ok ? r.json() : [])).then(setNums).catch(() => {});
@@ -55,22 +58,32 @@ function PhoneInner() {
     : v.status === "ready" ? "Line ready" : v.status === "error" ? `Line error: ${v.error}` : "Connecting…";
   const lineOk = cfg?.configured && v.status === "ready";
 
-  // ---- phones / tablets: hand off to the native dialer ---------------------
+  // ---- phones / tablets: hand off to the native dialer; desktops: list only
   if (!isPanel) {
     return (
       <div className="flex flex-col gap-3">
-        <p className="text-xs text-ink-muted">On a phone, calls go through your phone&apos;s own dialer.</p>
-        {nums.map((n) => (
+        <p className="text-xs text-ink-muted">
+          {dialer ? "On a phone, calls go through your phone's own dialer."
+                  : "This computer isn't a phone. Calls are placed from the wall panel (or from a phone, through its own dialer)."}
+        </p>
+        {nums.map((n) => dialer ? (
           <a key={n.id} href={`tel:${n.number}`} className="flex items-center gap-3 rounded-xl border border-line bg-panel px-4 py-3">
             <span className="grid h-10 w-10 place-items-center rounded-full bg-panel-raised text-base font-bold text-lamp">{n.name[0]?.toUpperCase()}</span>
             <span className="flex-1"><span className="block font-semibold">{n.name}</span><span className="block text-xs text-ink-muted">{n.pretty}</span></span>
             <Phone size={20} className="text-ok" />
           </a>
+        ) : (
+          <div key={n.id} className="flex items-center gap-3 rounded-xl border border-line bg-panel px-4 py-3">
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-panel-raised text-base font-bold text-lamp">{n.name[0]?.toUpperCase()}</span>
+            <span className="flex-1"><span className="block font-semibold">{n.name}</span><span className="block text-xs text-ink-muted">{n.pretty}</span></span>
+          </div>
         ))}
         {nums.length === 0 && <p className="text-sm text-ink-muted">No numbers on the allowed list yet.</p>}
-        <a href="tel:911" className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-alert px-4 py-4 text-lg font-extrabold text-white">
-          <ShieldAlert size={22} /> Call 911
-        </a>
+        {dialer && (
+          <a href="tel:911" className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-alert px-4 py-4 text-lg font-extrabold text-white">
+            <ShieldAlert size={22} /> Call 911
+          </a>
+        )}
       </div>
     );
   }
