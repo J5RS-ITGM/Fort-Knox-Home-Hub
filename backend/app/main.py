@@ -17,6 +17,7 @@ from .api.auth_routes import admin_router, auth_router, google_router, kiosk_rou
 from .api.family_routes import router as family_router
 from .api.routes import protected as protected_router
 from .api.routes import router as api_router
+from .api.voice_routes import voice_admin_router, voice_router, webhook_router as voice_webhook_router
 from .config import get_settings
 from .db import Base, engine
 from .bridge import manager
@@ -131,4 +132,7 @@ app.include_router(admin_router)
 app.include_router(family_router)
 app.include_router(kiosk_router)
 app.include_router(google_router)
+app.include_router(voice_router)
+app.include_router(voice_admin_router)
+app.include_router(voice_webhook_router)
 app.include_router(ws_router)

@@ -13,6 +13,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity, CalendarDays, ChefHat, Images, LayoutGrid, ListChecks, ListTodo,
   LogOut, MonitorSmartphone, MoreHorizontal, Settings, Shield, SlidersHorizontal, X,
+  Phone as PhoneIcon,
 } from "lucide-react";
 import AlarmControl from "@/components/AlarmControl";
 import KioskGate from "@/components/KioskGate";
@@ -34,6 +35,7 @@ const MORE: [string, string, React.ComponentType<{ size?: number }>][] = [
   ["/gallery", "Gallery", Images],
   ["/chores", "Tasks", ListChecks],
   ["/recipes", "Recipes", ChefHat],
+  ["/phone", "Phone", PhoneIcon],
   ["/sensors", "Sensors", Activity],
 ];
 

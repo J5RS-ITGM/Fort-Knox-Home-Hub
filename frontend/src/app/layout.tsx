@@ -7,6 +7,7 @@ import MobileNav from "@/components/MobileNav";
 import BottomTabs from "@/components/BottomTabs";
 import KioskKeyboard from "@/components/KioskKeyboard";
 import Screensaver from "@/components/Screensaver";
+import VoiceProvider from "@/components/VoiceProvider";
 import { themeBootScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
@@ -47,6 +48,7 @@ export default function RootLayout({
         {/* Screensaver sits under the alarm/leak overlays and the PIN pad
             (see its z-order note) and only auto-starts in kiosk mode. */}
         <Screensaver />
+        <VoiceProvider />
         <KioskKeyboard />
       </body>
     </html>

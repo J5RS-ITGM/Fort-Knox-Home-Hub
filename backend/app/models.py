@@ -292,3 +292,18 @@ class MaintenanceTask(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0 normal, 1 high
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AllowedNumber(Base):
+    """Phone allow-list for the wall panel's VOIP line (Twilio). The panel
+    can only place calls TO these numbers and only rings for calls FROM them
+    (see app/voice.py). 911 / 933 are never stored here — they are always
+    permitted by code. Admin-only to edit."""
+
+    __tablename__ = "allowed_numbers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)  # E.164, e.g. +16305550172
+    created_by: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

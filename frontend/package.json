@@ -10,6 +10,7 @@
     "lint:undef": "eslint -c lint-undef.mjs 'src/**/*.{js,jsx}'"
   },
   "dependencies": {
+    "@twilio/voice-sdk": "^2.18.5",
     "lucide-react": "^1.37.0",
     "next": "^15.5.0",
     "react": "^19.1.0",

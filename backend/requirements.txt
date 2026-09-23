@@ -11,3 +11,4 @@ bcrypt>=4.2
 openpyxl>=3.1
 python-multipart>=0.0.9
 cryptography>=42
+twilio>=9.3

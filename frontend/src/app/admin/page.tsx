@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 import { saverPreview } from "@/lib/panelDevice";
 import { SAVER_DEFAULTS } from "@/components/Screensaver";
+import PhoneAdminCard from "@/components/PhoneAdminCard";
 import { api, API_URL, AuditRow, Entity, User } from "@/lib/api";
 import { applyTheme, ThemeName } from "@/lib/theme";
 
@@ -596,6 +597,9 @@ function SettingsTab({ settings, entities, busy, act }: { settings: Record<strin
 
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Google Calendar sync</h3>
         <GoogleCalendarCard />
+
+        <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Phone &amp; 911</h3>
+        <PhoneAdminCard />
 
         <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Kiosk mode</h3>
         <p className="-mt-1 text-[11px] text-ink-muted">

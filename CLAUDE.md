@@ -81,6 +81,19 @@ confirm a disallowed service returns 403.
   Components that must block it call `saverHold(key, on)`; anything that
   must wake it calls `saverWake()`.
 
+## Phone line and 911 (Twilio) — see `backend/app/voice.py`
+
+- The backend NEVER places a 911 call by itself: there is no REST
+  `calls.create` anywhere. A call exists only when a browser with a live mic
+  connects and asks for "911" (a person held the button in `Call911.tsx`).
+- Outbound: TwiML dials only numbers on `allowed_numbers` (+ 911/933).
+  Inbound: rings the panels only from listed numbers, except for 30 min after
+  a 911 call (dispatcher callback). Both enforced in the webhooks, never in UI.
+- Webhooks (`/api/voice/twiml/*`) are unauthenticated but signature-verified
+  against `PUBLIC_URL`; Twilio credentials are Fernet-encrypted app settings.
+- Only wall panels / kiosk sessions register a Voice SDK Device. Phones use
+  `tel:` links — the registered E911 address is the house.
+
 ## Workflow
 
 - Work on branches, open PRs. Never push to `main` directly.

@@ -23,6 +23,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Moon, DoorOpen, TriangleAlert } from "lucide-react";
 import { api, callService } from "@/lib/api";
+import Call911 from "@/components/Call911";
+import { useIsPhoneDevice } from "@/components/VoiceProvider";
+import { warmMic } from "@/lib/voice";
 import { usePinGate } from "@/lib/pinGate";
 import { isKiosk, useMe } from "@/lib/auth";
 
@@ -119,6 +122,16 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
   // pages there is no alarm tile mounted to receive a signal.
   const { me } = useMe();
   const { run: runPin, pad: disarmPad } = usePinGate();
+  // Call 911 on the popup (triggered only). Wall panels/kiosk use the VOIP
+  // hold-to-call screen; phones hand off to their own dialer (tel:911)
+  // because the registered E911 address is the house, not the phone.
+  const phoneDevice = useIsPhoneDevice();
+  const [show911, setShow911] = useState(false);
+  const [voiceCfg, setVoiceCfg] = useState<{ configured: boolean; auto_show_911: boolean } | null>(null);
+  useEffect(() => {
+    if (!phoneDevice) return;
+    api("/api/voice/config").then((r) => (r.ok ? r.json() : null)).then((c) => c && setVoiceCfg(c)).catch(() => {});
+  }, [phoneDevice]);
   const [disarming, setDisarming] = useState(false);
   const [disarmErr, setDisarmErr] = useState("");
   const disarm = async () => {
@@ -180,9 +193,14 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
     () => (state === "pending" || state === "triggered") ? trippedSensorName(alarm, entities) : "",
     [state, alarm, entities]);
 
+  const red = state === "triggered";
+  // "auto prepare": the moment the alarm trips, warm the mic permission so a
+  // 911 call connects instantly when a person holds the button. Nothing is
+  // dialled here.
+  useEffect(() => { if (red && phoneDevice && voiceCfg?.configured) void warmMic(); }, [red, phoneDevice, voiceCfg?.configured]);
+
   if (!active) return null;
 
-  const red = state === "triggered";
   const P = red
     ? { card: "#1e0908", border: "#e0483d", ink: "#f0997b", btn: "#e0483d", btnInk: "#1e0908", scrim: "rgba(30,6,6,0.45)", glow: "rgba(224,72,61,0.55)" }
     : { card: "#1c1406", border: "#e8a33d", ink: "#e8a33d", btn: "#e8a33d", btnInk: "#1c1406", scrim: "rgba(6,8,12,0.40)", glow: "rgba(232,163,61,0.45)" };
@@ -240,14 +258,32 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
         )}
 
         {disarmPad}
-        {(
+        {show911 && <Call911 onClose={() => setShow911(false)} />}
+        <div style={{ display: "flex", gap: "clamp(10px, 2.4vmin, 14px)", justifyContent: "center", flexWrap: "wrap",
+                      marginTop: "clamp(14px, 3vmin, 28px)" }}>
           <button onClick={() => void disarm()} disabled={disarming}
-            style={{ marginTop: "clamp(14px, 3vmin, 28px)", padding: "clamp(12px,2.6vmin,18px) clamp(28px,8vmin,64px)",
+            style={{ padding: "clamp(12px,2.6vmin,18px) clamp(28px,8vmin,64px)",
                      fontSize: "clamp(16px, 3vmin, 22px)", fontWeight: 800, borderRadius: 14, border: "none",
                      cursor: "pointer", background: P.btn, color: P.btnInk, touchAction: "manipulation" }}>
             {disarming ? "…" : state === "arming" ? "Cancel" : "Disarm"}
           </button>
-        )}
+          {red && phoneDevice && voiceCfg?.configured && voiceCfg.auto_show_911 && (
+            <button onClick={() => setShow911(true)}
+              style={{ padding: "clamp(12px,2.6vmin,18px) clamp(22px,6vmin,44px)",
+                       fontSize: "clamp(16px, 3vmin, 22px)", fontWeight: 800, borderRadius: 14, border: "none",
+                       cursor: "pointer", background: "#e0483d", color: "#fff", touchAction: "manipulation" }}>
+              Call 911
+            </button>
+          )}
+          {red && !phoneDevice && (
+            <a href="tel:911"
+              style={{ padding: "clamp(12px,2.6vmin,18px) clamp(22px,6vmin,44px)", display: "inline-block",
+                       fontSize: "clamp(16px, 3vmin, 22px)", fontWeight: 800, borderRadius: 14, textDecoration: "none",
+                       background: "#e0483d", color: "#fff", touchAction: "manipulation" }}>
+              Call 911
+            </a>
+          )}
+        </div>
         {disarmErr && <div style={{ marginTop: 8, fontSize: "clamp(12px, 2.6vmin, 16px)", fontWeight: 700, color: P.ink }}>{disarmErr}</div>}
       </div>
 
