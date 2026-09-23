@@ -84,11 +84,31 @@ async def call_service(
     pin = body.data.pop("pin", None)
 
     # Arm/disarm + lock/unlock PIN gate. Enforced here (not in the UI) so the
-    # API itself is protected; per-user, so the audit trail says WHO did it.
-    # Users without a PIN configured are not gated (set PINs for every
-    # account that can reach a wall panel).
-    if domain in PIN_GATED_DOMAINS and user.pin_hash is not None:
-        ip = request.client.host if request.client else "?"
+    # API itself is protected, and the audit trail says WHO did it.
+    #
+    # Two modes:
+    #  * Personal device (phone/tablet, logged in as a person): the PIN must
+    #    be THAT person's. Users without a PIN configured are not gated.
+    #  * Kiosk session (the shared wall panel): works like an alarm keypad.
+    #    ANY family member's PIN is accepted, a PIN is always required, and
+    #    the action is attributed to whoever's PIN it was, not the panel.
+    actor = user  # who the action is logged under
+    ip = request.client.host if request.client else "?"
+    if domain in PIN_GATED_DOMAINS and getattr(user, "kiosk", False):
+        check_rate_limit(f"pin:kiosk:{user.username}", ip)
+        if not pin:
+            raise HTTPException(403, "pin_required")
+        rows = (await session.execute(
+            select(models.User).where(models.User.pin_hash.is_not(None), models.User.disabled.is_(False))
+        )).scalars().all()
+        match = next((u for u in rows if verify_password(str(pin), u.pin_hash)), None)
+        if match is None:
+            record_failure(f"pin:kiosk:{user.username}", ip)
+            await audit(session, user.username, "alarm_pin_fail", f"{service} -> {body.entity_id} (kiosk)")
+            raise HTTPException(403, "pin_invalid")
+        clear_failures(f"pin:kiosk:{user.username}", ip)
+        actor = match
+    elif domain in PIN_GATED_DOMAINS and user.pin_hash is not None:
         check_rate_limit(f"pin:{user.username}", ip)
         if not pin:
             raise HTTPException(403, "pin_required")
@@ -97,6 +117,7 @@ async def call_service(
             await audit(session, user.username, "alarm_pin_fail", f"{service} -> {body.entity_id}")
             raise HTTPException(403, "pin_invalid")
         clear_failures(f"pin:{user.username}", ip)
+    via = "" if actor is user else f" (via kiosk {user.username})"
 
     bridge = manager.bridge
     if bridge is None:
@@ -105,7 +126,7 @@ async def call_service(
         await bridge.call_service(domain, service, body.entity_id, body.data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"service call failed: {exc}") from exc
-    await audit(session, user.username, "service_call", f"{domain}.{service} -> {body.entity_id}")
+    await audit(session, actor.username, "service_call", f"{domain}.{service} -> {body.entity_id}{via}")
 
     # A PIN-verified UNLOCK from the app also disarms the alarm. Same
     # credential as a disarm (the PIN gate above already passed), so this adds
@@ -120,8 +141,8 @@ async def call_service(
             try:
                 await bridge.call_service("alarm_control_panel", "alarm_disarm", ALARM_ENTITY, {})
                 disarmed = True
-                await audit(session, user.username, "service_call",
-                            f"alarm_control_panel.alarm_disarm -> {ALARM_ENTITY} (with unlock of {body.entity_id})")
+                await audit(session, actor.username, "service_call",
+                            f"alarm_control_panel.alarm_disarm -> {ALARM_ENTITY} (with unlock of {body.entity_id}){via}")
             except Exception:  # noqa: BLE001
                 # the door still unlocked; the app will show the alarm still armed
                 pass

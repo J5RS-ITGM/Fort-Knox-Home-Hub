@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { callService, Entity, ServiceError } from "@/lib/api";
 import { useHomeHub } from "@/lib/useHomeHub";
-import { useMe } from "@/lib/auth";
+import { isKiosk, useMe } from "@/lib/auth";
 import PinPad from "@/components/PinPad";
 
 const ALARM_ENTITY = "alarm_control_panel.homehub";
@@ -124,7 +124,7 @@ export default function AlarmControl({
   // Arm press -> choose a mode first. Disarm press -> straight to PIN (or go).
   const send = (wantArmed: boolean) => {
     if (wantArmed) { setChoosingArm(true); return; }
-    if (me?.pin_set) { setPinError(""); setPinFor({ wantArmed: false }); }
+    if (me?.pin_set || isKiosk(me)) { setPinError(""); setPinFor({ wantArmed: false }); }
     else void dispatch(false);
   };
 

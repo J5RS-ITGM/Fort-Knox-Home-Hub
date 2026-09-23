@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Moon, DoorOpen, TriangleAlert } from "lucide-react";
 import { api, callService } from "@/lib/api";
 import { usePinGate } from "@/lib/pinGate";
-import { useMe } from "@/lib/auth";
+import { isKiosk, useMe } from "@/lib/auth";
 
 const ALARM_ENTITY = "alarm_control_panel.homehub";
 
@@ -123,7 +123,7 @@ export default function AlarmOverlay({ alarm, entities, onDisarm }: {
       const ok = await runPin(
         "PIN to disarm",
         (pin) => callService("alarm_control_panel", "alarm_disarm", ALARM_ENTITY, pin ? { pin } : {}).then(() => undefined),
-        { requirePin: Boolean(me?.pin_set) },
+        { requirePin: Boolean(me?.pin_set) || isKiosk(me) },
       );
       if (ok) onDisarm?.();
       else if (!me?.pin_set) setDisarmErr("Couldn't reach the alarm — try the Disarm tile");

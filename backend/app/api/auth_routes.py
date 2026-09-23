@@ -214,6 +214,13 @@ async def patch_user(
     if body.pin is not None:
         if not (body.pin.isdigit() and 4 <= len(body.pin) <= 8):
             raise HTTPException(422, "PIN must be 4-8 digits")
+        # The wall panel accepts any family member's PIN and logs who used
+        # it, so two people can't share one: refuse a PIN already in use.
+        others = (await db.execute(
+            select(models.User).where(models.User.pin_hash.is_not(None), models.User.id != user.id)
+        )).scalars().all()
+        if any(verify_password(body.pin, o.pin_hash) for o in others):
+            raise HTTPException(409, "That PIN is already used by another family member — pick a different one")
         user.pin_hash = hash_password(body.pin)
         changes.append("pin_set")
     if body.clear_pin:
